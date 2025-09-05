@@ -1,6 +1,9 @@
 // scripts/generate-paper.js
-// Mix FR (plusieurs flux) • N actus/jour • image = og:image si possible, sinon Openverse
-// Dé-duplication forte des images + variété des sources.
+// Flux mixte FR • 1 actu par exécution (toutes les 15 min)
+// Choisit la 1ʳᵉ actu NON PUBLIÉE.
+// Image = og:image de l’article si possible (même si déjà vue ailleurs).
+// Fallback Openverse filtré (anti-meme/illustration, dimensions minimales, providers photo),
+// et dédoublonnage des images Openverse (pas d'images identiques).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -10,16 +13,15 @@ import slugify from "slugify";
 import matter from "gray-matter";
 
 /* ---- CONFIG ---- */
-const ITEMS_PER_DAY = 1; // ← UNE actu par exécution (toutes les 15 min)
-
-const OPENVERSE_PAGE_SIZE = 12;          // nb de candidates image à tester
+const ITEMS_PER_RUN = 1;                 // 1 actu par exécution (cron toutes les 15 min)
+const OPENVERSE_PAGE_SIZE = 12;          // nb maximal de candidates Openverse à tester
 const FEEDS = [
-  { name: "Franceinfo", url: "https://www.francetvinfo.fr/titres.rss" },
-  { name: "France 24",  url: "https://www.france24.com/fr/rss" },
-  { name: "RFI",        url: "https://www.rfi.fr/fr/france/rss" },
-  { name: "20 Minutes", url: "http://www.20minutes.fr/rss/une.xml" },
-  { name: "Ouest-France", url: "https://www.ouest-france.fr/rss-en-continu.xml" },
-  { name: "Le Monde",   url: "https://www.lemonde.fr/rss/une.xml" },
+  { name: "Franceinfo",    url: "https://www.francetvinfo.fr/titres.rss" },
+  { name: "France 24",     url: "https://www.france24.com/fr/rss" },
+  { name: "RFI",           url: "https://www.rfi.fr/fr/france/rss" },
+  { name: "20 Minutes",    url: "http://www.20minutes.fr/rss/une.xml" },
+  { name: "Ouest-France",  url: "https://www.ouest-france.fr/rss-en-continu.xml" },
+  { name: "Le Monde",      url: "https://www.lemonde.fr/rss/une.xml" },
 ];
 
 /* ---- Utils ---- */
@@ -100,52 +102,87 @@ async function fetchOgImage(articleUrl) {
     const pick = (re) => html.match(re)?.[1];
     const og = pick(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
     const tw = pick(/<meta[^>]+name=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/i);
-    const candidates = [og, tw].filter(Boolean).map((u) => { try { return new URL(u, articleUrl).href; } catch { return null; } }).filter(Boolean);
+    const candidates = [og, tw]
+      .filter(Boolean)
+      .map((u) => { try { return new URL(u, articleUrl).href; } catch { return null; } })
+      .filter(Boolean);
     if (!candidates.length) return null;
     return { url: candidates[0], credit: "Image de l’article — droits possiblement réservés", source: articleUrl };
   } catch { return null; }
 }
 
-/* ---- Fallback Openverse (plusieurs résultats) ---- */
+/* ---- Filtres Openverse (pertinence) ---- */
+const BAD_WORDS = [
+  "meme","poster","flyer","banner","logo","icon","clipart","wallpaper",
+  "quote","typography","infographic","chart","graph","diagram","vector",
+  "illustration","ai generated","prompt","template"
+];
+const PREFERRED_PROVIDERS = new Set(["wikimedia", "flickr"]);
+function looksBad(str = "", tags = []) {
+  const s = (str || "").toLowerCase();
+  if (BAD_WORDS.some(w => s.includes(w))) return true;
+  const tagText = (tags || []).map(t => (t.name || t.title || t).toString().toLowerCase()).join(" ");
+  if (BAD_WORDS.some(w => tagText.includes(w))) return true;
+  return false;
+}
+
+/* ---- Fallback Openverse (plusieurs résultats filtrés) ---- */
 async function findImageOpenverse(query, avoidFP) {
   const variants = [query, keywordsFromTitle(query), "France actualité"].filter(Boolean);
+
   for (const q of variants) {
     try {
       const api = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&license_type=commercial&page_size=${OPENVERSE_PAGE_SIZE}`;
       const res = await fetch(api, { headers: { "User-Agent": "paper-du-jour (+https://github.com/)" } });
       if (!res.ok) continue;
       const data = await res.json();
-      for (const it of (data.results || [])) {
+
+      let results = (data.results || []).filter(it => {
         const url = it.url || it.thumbnail;
-        if (!url) continue;
+        if (!url) return false;
+        if (looksBad(it.title, it.tags)) return false;
+        if (it.category && String(it.category).toLowerCase() !== "photograph") return false;
+        if (it.width && it.height && (it.width < 600 || it.height < 400)) return false;
         const fp = normalizeUrl(url);
-        if (avoidFP.has(fp)) continue;
+        if (avoidFP.has(fp)) return false; // déjà utilisée
+        return true;
+      });
+
+      // On privilégie les providers photo fiables
+      results.sort((a, b) => {
+        const ap = PREFERRED_PROVIDERS.has(String(a.provider).toLowerCase()) ? 0 : 1;
+        const bp = PREFERRED_PROVIDERS.has(String(b.provider).toLowerCase()) ? 0 : 1;
+        return ap - bp;
+      });
+
+      const it = results[0];
+      if (it) {
+        const url = it.url || it.thumbnail;
         return {
           url,
           credit: `${it.creator ? it.creator : "Auteur inconnu"} — ${(it.license || "CC").toUpperCase()} via Openverse`,
           source: it.foreign_landing_url || it.url,
         };
       }
-    } catch { /* try next variant */ }
+    } catch {
+      // on tente la variante suivante
+    }
   }
   return null;
 }
 
-/* ---- Sélection mixte (variété de sources) ---- */
+/* ---- Sélection variée par source (ordre), puis 1re NON PUBLIÉE ---- */
 function pickMixed(items, count) {
-  // tri anti-ancien
   items.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
-  // index par source
   const bySource = new Map();
   for (const it of items) {
     if (!bySource.has(it.source)) bySource.set(it.source, []);
     bySource.get(it.source).push(it);
   }
-  // round-robin : 1 par source jusqu’à count
   const picks = [];
   const sources = [...bySource.keys()];
   let idx = 0;
-  while (picks.length < count && sources.length) {
+  while (picks.length < count * 6 && sources.length) {
     const s = sources[idx % sources.length];
     const arr = bySource.get(s);
     const next = arr?.shift();
@@ -164,108 +201,22 @@ function pickMixed(items, count) {
       sources.splice(idx % sources.length, 1);
     }
   }
-  // si pas assez, on remplit avec le flux global trié
-  if (picks.length < count) {
-    const pickedSet = new Set(picks.map((x) => x.link));
+  // compléter si besoin
+  if (picks.length < count * 6) {
+    const set = new Set(picks.map((x) => x.link));
     for (const it of items) {
-      if (picks.length >= count) break;
-      if (!pickedSet.has(it.link)) {
-        picks.push(it);
-        pickedSet.add(it.link);
-      }
+      if (picks.length >= count * 6) break;
+      if (!set.has(it.link)) { picks.push(it); set.add(it.link); }
     }
   }
-  return picks.slice(0, count);
+  return picks;
 }
 
 /* ---- MAIN ---- */
 async function main() {
-  // 1) Charger tous les flux + uniformiser les items
+  // 1) Charger tous les flux
   const all = [];
   for (const f of FEEDS) {
     try {
       const entries = await fetchFeed(f.url);
-      for (const e of entries) {
-        const item = toItem(e, f.name);
-        if (item.title && item.link) all.push(item);
-      }
-    } catch (err) {
-      console.error("Feed error:", f.name, f.url, String(err).slice(0, 120));
-    }
-  }
-
-  if (!all.length) throw new Error("Aucune actualité trouvée sur les flux configurés.");
-
-  // 2) Dé-dup des articles (même lien normalisé)
-  const seenLinks = new Set();
-  const unique = [];
-  for (const it of all) {
-    const key = normalizeUrl(it.link);
-    if (seenLinks.has(key)) continue;
-    seenLinks.add(key);
-    unique.push(it);
-  }
-
-  // 3) Sélection variée
-  const picks = pickMixed(unique, ITEMS_PER_DAY);
-
-  // 4) Sortie
-  const outDir = path.join("src", "content", "papers");
-  fs.mkdirSync(outDir, { recursive: true });
-
-  const existingFP = getExistingImageFPs();
-  const usedThisRun = new Set();
-
-  for (const p of picks) {
-    const short = cleanText(p.summary).split(/(?<=[.!?])\s+/).slice(0, 2).join(" ");
-    const date = new Date(p.dateISO);
-    const yyyy = date.getUTCFullYear();
-    const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(date.getUTCDate()).padStart(2, "0");
-    const niceDate = `${yyyy}-${mm}-${dd}`;
-
-    const title = p.title;
-    const slug = `${niceDate}-${slugify(title, { lower: true, strict: true })}`;
-    const target = path.join(outDir, `${slug}.md`);
-    if (fs.existsSync(target)) {
-      console.log("⏭️  Déjà présent, skip:", slug);
-      continue;
-    }
-
-    // image: og:image -> fallback Openverse
-    let img = await fetchOgImage(p.link);
-    let fp = img?.url ? normalizeUrl(img.url) : null;
-    if (!img || (fp && (existingFP.has(fp) || usedThisRun.has(fp)))) {
-      const alt = await findImageOpenverse(title, new Set([...existingFP, ...usedThisRun]));
-      if (alt) {
-        img = alt;
-        fp = normalizeUrl(alt.url);
-      } else if (fp && (existingFP.has(fp) || usedThisRun.has(fp))) {
-        img = null; fp = null;
-      }
-    }
-    if (fp) usedThisRun.add(fp);
-
-    const frontmatter = {
-      title,
-      date: date.toISOString(),
-      publishedDate: date.toLocaleDateString("fr-FR", { year: "numeric", month: "long", day: "numeric" }),
-      summary: short,
-      importance: "",
-      sourceUrl: p.link,
-      tags: ["France", "Actualité", p.source],
-      permalink: `/papers/${slug}`,
-      imageUrl: img?.url || "",
-      imageCredit: img ? `${img.credit}${img.source ? " — " + img.source : ""}` : ""
-    };
-
-    const body =
-      (img?.url ? `![${title}](${img.url})\n\n${frontmatter.imageCredit ? `*Crédit image : ${frontmatter.imageCredit}*\n\n` : ""}` : "") +
-      `## L’essentiel\n\n${short}\n\n## Lien source\n\n${p.link}\n`;
-
-    fs.writeFileSync(target, `---\n${yaml(frontmatter)}---\n\n${body}`, "utf-8");
-    console.log(`✅ Généré: ${slug} ${img ? "(image OK)" : "(pas d'image)"} — ${p.source}`);
-  }
-}
-
-main().catch((e) => { console.error(e); process.exit(1); });
+      for (const e of ent
