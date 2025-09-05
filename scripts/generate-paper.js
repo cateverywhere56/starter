@@ -50,7 +50,7 @@ async function main() {
 
   const title = p.title;
   const summary = p.summary.split(/(?<=[.!?])\s+/).slice(0, 2).join(" ");
-  const importance = ""; // (optionnel) tu peux enrichir plus tard avec OpenAI
+  const importance = "";
   const tags = p.categories.slice(0, 5);
 
   const slug = `${niceDate}-${slugify(title, { lower: true, strict: true })}`;
