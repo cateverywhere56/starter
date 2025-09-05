@@ -2,10 +2,10 @@ name: Daily Paper du jour
 
 on:
   schedule:
-    - cron: '0 6 * * *'
-  workflow_dispatch: {}
+    - cron: '0 6 * * *'      # exécution quotidienne
+  workflow_dispatch: {}       # bouton "Run workflow"
   push:
-    branches: [ main ]
+    branches: [ main ]        # déclenche aussi sur push
 
 permissions:
   contents: write
@@ -25,55 +25,15 @@ jobs:
 
       - name: Debug workspace
         run: |
-          echo "PWD:" && pwd
-          echo "List root:" && ls -la
-          echo "Show package.json (first lines):"
-          head -n 50 package.json || true
+          echo "== PWD ==" && pwd
+          echo "== LS root ==" && ls -la
+          echo "== Show package.json (head) ==" && head -n 40 package.json || true
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20'   # pas de cache pour éviter l'avertissement de lockfile
 
       - name: Ensure package.json exists
         run: |
-          test -f package.json || (echo "❌ package.json introuvable à la racine" && exit 1)
-
-      - name: Install deps (with fallbacks)
-        run: |
-          npm -v && node -v
-          npm cache clean --force
-          npm install --no-audit --no-fund || \
-          npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Generate daily paper
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: npm run generate
-
-      - name: Build
-        env:
-          CI: false
-        run: npm run build
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          test -f package.json || (echo "❌ package.json i
