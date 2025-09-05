@@ -1,3 +1,37 @@
 ---
+import fs from 'node:fs';
+import path from 'node:path';
+import matter from 'gray-matter';
+
+const dir = path.join(Astro.srcDir, 'content', 'papers');
+const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith('.md')) : [];
+
+const posts = files.map(f => {
+  const raw = fs.readFileSync(path.join(dir, f), 'utf-8');
+  const { data } = matter(raw);
+  return data as any;
+}).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 ---
-<html><body><h1>Papers du jour</h1></body></html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Paper du jour — IA</title>
+  </head>
+  <body style="font-family: system-ui; max-width: 900px; margin: 0 auto; padding: 24px;">
+    <h1>Papers du jour</h1>
+    {posts.length === 0 ? (
+      <p style="margin-top:16px; opacity:.8;">Aucun paper trouvé pour l’instant. Relance le workflow et recharge la page.</p>
+    ) : (
+      <main style="display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); margin-top:24px;">
+        {posts.map(p => (
+          <a href={p.permalink} style="text-decoration:none; color:inherit; border:1px solid #eee; border-radius:12px; padding:16px; display:block;">
+            <h3 style="margin:0 0 6px 0;">{p.title}</h3>
+            <div style="opacity:.7; font-size: 14px;">{new Date(p.date).toLocaleDateString('fr-FR')}</div>
+            <p style="margin-top:8px; opacity:.9;">{p.summary}</p>
+            <div style="margin-top:6px; font-size:12px; opacity:.8;">{(p.tags || []).slice(0,3).join(' · ')}</div>
+          </a>
+        ))}
+      </main>
+    )}
+  </body>
+</html>
