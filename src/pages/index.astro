@@ -1,32 +1,57 @@
 ---
+/**
+ * Liste des actualités générées (Markdown) via import.meta.glob.
+ */
 const modules = import.meta.glob('../content/papers/*.md', { eager: true });
+
 const posts = Object.values(modules)
   .map((m: any) => m.frontmatter)
+  .filter((fm: any) => fm && fm.title && fm.permalink)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 ---
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <title>Paper du jour — IA</title>
+    <title>Actualités — France</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
   </head>
-  <body style="font-family: system-ui; max-width: 900px; margin: 0 auto; padding: 24px;">
-    <h1>Papers du jour</h1>
+  <body style="font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 960px; margin: 0 auto; padding: 24px;">
+    <header>
+      <h1 style="margin:0 0 8px 0;">Actualités — France</h1>
+      <p style="opacity:.7;margin:0;">Une info du jour, en français.</p>
+    </header>
 
     {posts.length === 0 ? (
-      <p style="margin-top:16px; opacity:.8;">Aucun paper trouvé pour l’instant. Relance le workflow et recharge la page.</p>
+      <p style="margin-top:16px; opacity:.8;">
+        Aucune actualité pour l’instant. Relance le workflow et recharge la page.
+      </p>
     ) : (
-<main style="display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); margin-top:24px;">
-  {posts.map((p: any) => (
-    <a href={p.permalink} style="text-decoration:none; color:inherit; border:1px solid #eee; border-radius:12px; padding:16px; display:block;">
-      {p.imageUrl && <img src={p.imageUrl} alt={p.title} style="width:100%; height:160px; object-fit:cover; border-radius:10px; margin-bottom:10px;" />}
-      <h3 style="margin:0 0 6px 0;">{p.title}</h3>
-      <div style="opacity:.7; font-size: 14px;">{new Date(p.date).toLocaleDateString('fr-FR')}</div>
-      <p style="margin-top:8px; opacity:.9;">{p.summary}</p>
-      <div style="margin-top:6px; font-size:12px; opacity:.8;">{(p.tags || []).slice(0,3).join(' · ')}</div>
-    </a>
-  ))}
-</main>
-    
+      <main style="display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); margin-top:24px;">
+        {posts.map((p: any) => (
+          <a href={p.permalink} style="text-decoration:none; color:inherit; border:1px solid #eee; border-radius:12px; padding:16px; display:block;">
+            {p.imageUrl && (
+              <img
+                src={p.imageUrl}
+                alt={p.title}
+                loading="lazy"
+                style="width:100%; height:160px; object-fit:cover; border-radius:10px; margin-bottom:10px;"
+              />
+            )}
+            <h3 style="margin:0 0 6px 0;">{p.title}</h3>
+            <div style="opacity:.7; font-size: 14px;">
+              {new Date(p.date).toLocaleDateString('fr-FR')}
+            </div>
+            <p style="margin-top:8px; opacity:.9;">{p.summary}</p>
+            <div style="margin-top:6px; font-size:12px; opacity:.8;">
+              {(p.tags || []).slice(0,3).join(' · ')}
+            </div>
+          </a>
+        ))}
+      </main>
     )}
+
+    <footer style="opacity:.6; font-size:12px; margin-top:32px;">
+      © {new Date().getFullYear()} — Actualités France
+    </footer>
   </body>
 </html>
