@@ -10,7 +10,8 @@ import slugify from "slugify";
 import matter from "gray-matter";
 
 /* ---- CONFIG ---- */
-const ITEMS_PER_DAY = 6;                 // combien d'actus tu veux par jour
+const ITEMS_PER_DAY = 1; // ← UNE actu par exécution (toutes les 15 min)
+
 const OPENVERSE_PAGE_SIZE = 12;          // nb de candidates image à tester
 const FEEDS = [
   { name: "Franceinfo", url: "https://www.francetvinfo.fr/titres.rss" },
