@@ -23,17 +23,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug workspace
+        run: |
+          echo "PWD:" && pwd
+          echo "List root:" && ls -la
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'   # pas de cache ici
+          node-version: '20'   # ⚠️ pas de cache ici
 
       - name: Install deps
-        run: npm install       # fonctionne sans lockfile
+        run: npm install       # pas besoin de lockfile
 
       - name: Generate daily paper
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # optionnel
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npm run generate
 
       - name: Build
