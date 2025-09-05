@@ -1,318 +1,100 @@
-// scripts/generate-paper.js
-// Flux mixte FR • 1 actu par exécution (toutes les 15 min).
-// Choisit la 1ʳᵉ actu NON PUBLIÉE.
-// Image = og:image de l’article si possible (même si déjà vue ailleurs).
-// Fallback Openverse filtré + anti-doublons (Openverse seulement).
+---
+/**
+ * Page d’accueil : liste des actus générées (Markdown).
+ * Titre + image ouvrent l’article source. Fond #D9D9D9. Logo de la source.
+ */
+const modules = import.meta.glob('../content/papers/*.md', { eager: true });
 
-import fs from "node:fs";
-import path from "node:path";
-import fetch from "node-fetch";
-import { parseStringPromise } from "xml2js";
-import slugify from "slugify";
-import matter from "gray-matter";
+const posts = Object.values(modules)
+  .map((m) => (m as any).frontmatter)
+  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
+  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-/* ---- CONFIG ---- */
-const ITEMS_PER_RUN = 1;                 // 1 actu par exécution
-const OPENVERSE_PAGE_SIZE = 12;          // nb max d’images candidates Openverse
-const FEEDS = [
-  { name: "Franceinfo",    url: "https://www.francetvinfo.fr/titres.rss" },
-  { name: "France 24",     url: "https://www.france24.com/fr/rss" },
-  { name: "RFI",           url: "https://www.rfi.fr/fr/france/rss" },
-  { name: "20 Minutes",    url: "http://www.20minutes.fr/rss/une.xml" },
-  { name: "Ouest-France",  url: "https://www.ouest-france.fr/rss-en-continu.xml" },
-  { name: "Le Monde",      url: "https://www.lemonde.fr/rss/une.xml" },
-];
-
-/* ---- Utils ---- */
-function yaml(frontmatter) {
-  const esc = (v) => String(v).replace(/"/g, '\\"');
-  return (
-    Object.entries(frontmatter)
-      .map(([k, v]) =>
-        Array.isArray(v)
-          ? `${k}: [${v.map((x) => `"${esc(x)}"`).join(", ")}]`
-          : `${k}: "${esc(v)}"`
-      )
-      .join("\n") + "\n"
-  );
+function hostOf(url: string) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
 }
-function cleanText(s = "") {
-  return String(s).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+const brandMap: Record<string, string> = {
+  'francetvinfo.fr': 'Franceinfo',
+  'france24.com': 'France 24',
+  'rfi.fr': 'RFI',
+  '20minutes.fr': '20 Minutes',
+  'ouest-france.fr': 'Ouest-France',
+  'lemonde.fr': 'Le Monde',
+};
+function brandOf(url: string) {
+  const h = hostOf(url);
+  return brandMap[h] || h || 'Source';
 }
-function normalizeUrl(u) {
-  try {
-    const x = new URL(u);
-    return (x.origin + x.pathname).replace(/\/+$/, "").toLowerCase();
-  } catch {
-    return String(u).toLowerCase();
-  }
+function faviconOf(url: string) {
+  const h = hostOf(url);
+  return h ? `https://www.google.com/s2/favicons?domain=${h}&sz=64` : '';
 }
-const FR_STOP = new Set([
-  "le","la","les","un","une","des","de","du","d","l","au","aux","à","a",
-  "en","et","ou","où","sur","dans","par","pour","avec","sans","vers","chez",
-  "ce","cet","cette","ces","son","sa","ses","leur","leurs","plus","moins",
-  "est","sont","été","etre","être","sera","seront","auxquels","auxquelles"
-]);
-function keywordsFromTitle(title) {
-  const words = title
-    .toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
-    .split(/\s+/)
-    .filter((w) => w.length >= 4 && !FR_STOP.has(w));
-  return [...new Set(words)].slice(0, 4).join(" ");
-}
+---
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Actualités — France</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+  </head>
+  <body style="background:#D9D9D9; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; min-height:100vh;">
+    <div style="max-width: 1080px; margin: 0 auto; padding: 24px;">
+      <header>
+        <h1 style="margin:0 0 8px 0;">Actualités — France</h1>
+        <p style="opacity:.7;margin:0;">Une info du jour, en français.</p>
+      </header>
 
-/* ---- RSS → entries ---- */
-async function fetchFeed(url) {
-  const res = await fetch(url, { headers: { "User-Agent": "paper-du-jour (+https://github.com/)" } });
-  const xml = await res.text();
-  const parsed = await parseStringPromise(xml, { explicitArray: false });
-  const channel = parsed?.rss?.channel || parsed?.feed;
-  const raw = channel?.item || channel?.entry || [];
-  return Array.isArray(raw) ? raw : [raw];
-}
-function toItem(e, sourceName) {
-  const title = cleanText(e.title);
-  const summary = cleanText(e.description || e.summary || e.content);
-  const link = e.link?.href || e.link;
-  const dateISO = e.pubDate || e.published || e.updated || new Date().toISOString();
-  return { title, summary, link, dateISO, source: sourceName };
-}
+      {
+        posts.length === 0
+          ? (
+            <p style="margin-top:16px; opacity:.8;">
+              Aucune actualité pour l’instant. Relance le workflow et recharge la page.
+            </p>
+          )
+          : (
+            <main style="display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); margin-top:24px;">
+              {posts.map((p: any) => (
+                <a
+                  href={p.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`Ouvrir l’article source : ${p.title}`}
+                  style="text-decoration:none; color:inherit; background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:16px; display:block; box-shadow:0 1px 2px rgba(0,0,0,.04);"
+                >
+                  {p.imageUrl && (
+                    <img
+                      src={p.imageUrl}
+                      alt={p.title}
+                      loading="lazy"
+                      style="display:block; width:100%; height:auto; max-height:260px; object-fit:contain; background:#f6f6f6; border-radius:10px; margin-bottom:10px;"
+                    />
+                  )}
+                  <h3 style="margin:0 0 6px 0; line-height:1.25;">{p.title}</h3>
+                  <div style="opacity:.7; font-size: 14px; margin-bottom:8px;">
+                    {new Date(p.date).toLocaleDateString('fr-FR')}
+                  </div>
+                  <p style="margin-top:0; opacity:.9;">{p.summary}</p>
 
-/* ---- Images existantes (anti-doublon inter-jours) ---- */
-function getExistingImageFPs() {
-  const dir = path.join("src", "content", "papers");
-  const set = new Set();
-  if (!fs.existsSync(dir)) return set;
-  for (const f of fs.readdirSync(dir)) {
-    if (!f.endsWith(".md")) continue;
-    const raw = fs.readFileSync(path.join(dir, f), "utf-8");
-    const { data } = matter(raw);
-    if (data?.imageUrl) set.add(normalizeUrl(String(data.imageUrl)));
-  }
-  return set;
-}
-
-/* ---- og:image de l’article ---- */
-async function fetchOgImage(articleUrl) {
-  try {
-    const res = await fetch(articleUrl, { headers: { "User-Agent": "paper-du-jour (+https://github.com/)" } });
-    if (!res.ok) return null;
-    const html = await res.text();
-    const pick = (re) => html.match(re)?.[1];
-    const og = pick(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
-    const tw = pick(/<meta[^>]+name=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/i);
-    const candidates = [og, tw]
-      .filter(Boolean)
-      .map((u) => { try { return new URL(u, articleUrl).href; } catch { return null; } })
-      .filter(Boolean);
-    if (!candidates.length) return null;
-    return { url: candidates[0], credit: "Image de l’article — droits possiblement réservés", source: articleUrl };
-  } catch {
-    return null;
-  }
-}
-
-/* ---- Filtres Openverse (pertinence) ---- */
-const BAD_WORDS = [
-  "meme","poster","flyer","banner","logo","icon","clipart","wallpaper",
-  "quote","typography","infographic","chart","graph","diagram","vector",
-  "illustration","ai generated","prompt","template"
-];
-const PREFERRED_PROVIDERS = new Set(["wikimedia", "flickr"]);
-function looksBad(str = "", tags = []) {
-  const s = (str || "").toLowerCase();
-  if (BAD_WORDS.some(w => s.includes(w))) return true;
-  const tagText = (tags || []).map(t => (t.name || t.title || t).toString().toLowerCase()).join(" ");
-  if (BAD_WORDS.some(w => tagText.includes(w))) return true;
-  return false;
-}
-
-/* ---- Fallback Openverse (plusieurs résultats filtrés) ---- */
-async function findImageOpenverse(query, avoidFP) {
-  const variants = [query, keywordsFromTitle(query), "France actualité"].filter(Boolean);
-
-  for (const q of variants) {
-    try {
-      const api = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&license_type=commercial&page_size=${OPENVERSE_PAGE_SIZE}`;
-      const res = await fetch(api, { headers: { "User-Agent": "paper-du-jour (+https://github.com/)" } });
-      if (!res.ok) continue;
-      const data = await res.json();
-
-      let results = (data.results || []).filter(it => {
-        const url = it.url || it.thumbnail;
-        if (!url) return false;
-        if (looksBad(it.title, it.tags)) return false;
-        if (it.category && String(it.category).toLowerCase() !== "photograph") return false;
-        if (it.width && it.height && (it.width < 600 || it.height < 400)) return false;
-        const fp = normalizeUrl(url);
-        if (avoidFP.has(fp)) return false;
-        return true;
-      });
-
-      // Priorité aux providers photo fiables
-      results.sort((a, b) => {
-        const ap = PREFERRED_PROVIDERS.has(String(a.provider).toLowerCase()) ? 0 : 1;
-        const bp = PREFERRED_PROVIDERS.has(String(b.provider).toLowerCase()) ? 0 : 1;
-        return ap - bp;
-      });
-
-      const it = results[0];
-      if (it) {
-        const url = it.url || it.thumbnail;
-        return {
-          url,
-          credit: `${it.creator ? it.creator : "Auteur inconnu"} — ${(it.license || "CC").toUpperCase()} via Openverse`,
-          source: it.foreign_landing_url || it.url,
-        };
+                  <div style="display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; opacity:.9;">
+                    {faviconOf(p.sourceUrl) && (
+                      <img
+                        src={faviconOf(p.sourceUrl)}
+                        alt=""
+                        width="16"
+                        height="16"
+                        style="border-radius:4px; flex:0 0 16px;"
+                      />
+                    )}
+                    <span>{brandOf(p.sourceUrl)}</span>
+                  </div>
+                </a>
+              ))}
+            </main>
+          )
       }
-    } catch {
-      // on essaie la variante suivante
-    }
-  }
-  return null;
-}
 
-/* ---- Sélection variée (ordre) puis 1ʳᵉ NON PUBLIÉE ---- */
-function pickMixed(items, count) {
-  items.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
-  const bySource = new Map();
-  for (const it of items) {
-    if (!bySource.has(it.source)) bySource.set(it.source, []);
-    bySource.get(it.source).push(it);
-  }
-  const picks = [];
-  const sources = [...bySource.keys()];
-  let idx = 0;
-  while (picks.length < count * 6 && sources.length) {
-    const s = sources[idx % sources.length];
-    const arr = bySource.get(s);
-    const next = arr?.shift();
-    if (next) {
-      picks.push(next);
-      if (!arr.length) {
-        bySource.delete(s);
-        sources.splice(idx % sources.length, 1);
-        if (!sources.length) break;
-        idx = idx % sources.length;
-        continue;
-      }
-      idx++;
-    } else {
-      bySource.delete(s);
-      sources.splice(idx % sources.length, 1);
-    }
-  }
-  if (picks.length < count * 6) {
-    const set = new Set(picks.map((x) => x.link));
-    for (const it of items) {
-      if (picks.length >= count * 6) break;
-      if (!set.has(it.link)) { picks.push(it); set.add(it.link); }
-    }
-  }
-  return picks;
-}
-
-/* ---- MAIN ---- */
-async function main() {
-  // 1) Charger tous les flux
-  const all = [];
-  for (const f of FEEDS) {
-    try {
-      const entries = await fetchFeed(f.url);
-      for (const e of entries) {
-        const item = toItem(e, f.name);
-        if (item.title && item.link) all.push(item);
-      }
-    } catch (err) {
-      console.error("Feed error:", f.name, f.url, String(err).slice(0, 120));
-    }
-  }
-  if (!all.length) throw new Error("Aucune actualité trouvée sur les flux configurés.");
-
-  // 2) Dé-dup des articles (par lien normalisé)
-  const seenLinks = new Set();
-  const unique = [];
-  for (const it of all) {
-    const key = normalizeUrl(it.link);
-    if (seenLinks.has(key)) continue;
-    seenLinks.add(key);
-    unique.push(it);
-  }
-
-  const outDir = path.join("src", "content", "papers");
-  fs.mkdirSync(outDir, { recursive: true });
-
-  // 3) Construire une liste “mixte” et choisir la 1ʳᵉ NON PUBLIÉE
-  const mixed = pickMixed(unique, ITEMS_PER_RUN);
-  const candidates = [...mixed, ...unique];
-  const picks = [];
-  for (const it of candidates) {
-    const date = new Date(it.dateISO);
-    const yyyy = date.getUTCFullYear();
-    const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(date.getUTCDate()).padStart(2, "0");
-    const niceDate = `${yyyy}-${mm}-${dd}`;
-    const slug = `${niceDate}-${slugify(it.title, { lower: true, strict: true })}`;
-    const target = path.join(outDir, `${slug}.md`);
-    if (!fs.existsSync(target)) {
-      picks.push({ it, slug, date });
-      if (picks.length >= ITEMS_PER_RUN) break;
-    }
-  }
-
-  if (!picks.length) {
-    console.log("Aucune nouvelle actu à ajouter (tout le récent est déjà publié).");
-    return;
-  }
-
-  // 4) Dé-dup images (inter-jours + intra-run) — sur Openverse uniquement
-  const existingFP = getExistingImageFPs();
-  const usedThisRun = new Set();
-
-  for (const { it: p, slug, date } of picks) {
-    const short = cleanText(p.summary).split(/(?<=[.!?])\s+/).slice(0, 2).join(" ");
-
-    // Image : on privilégie l’og:image (même si déjà utilisée ailleurs)
-    let img = await fetchOgImage(p.link);
-    let fp = img?.url ? normalizeUrl(img.url) : null;
-
-    // Si pas d’og:image → Openverse filtré + anti-doublon
-    if (!img) {
-      const alt = await findImageOpenverse(p.title, new Set([...existingFP, ...usedThisRun]));
-      if (alt) { img = alt; fp = normalizeUrl(alt.url); }
-    }
-
-    // Si l’image vient d’Openverse, on évite les doublons
-    if (img && img.credit?.toLowerCase().includes("openverse")) {
-      if (fp && (existingFP.has(fp) || usedThisRun.has(fp))) {
-        img = null; fp = null;
-      }
-    }
-
-    if (fp) usedThisRun.add(fp);
-
-    const frontmatter = {
-      title: p.title,
-      date: date.toISOString(),
-      publishedDate: date.toLocaleDateString("fr-FR", { year: "numeric", month: "long", day: "numeric" }),
-      summary: short,
-      importance: "",
-      sourceUrl: p.link,
-      tags: ["France", "Actualité", p.source],
-      permalink: `/papers/${slug}`,
-      imageUrl: img?.url || "",
-      imageCredit: img ? `${img.credit}${img.source ? " — " + img.source : ""}` : ""
-    };
-
-    const body =
-      (img?.url ? `![${p.title}](${img.url})\n\n${frontmatter.imageCredit ? `*Crédit image : ${frontmatter.imageCredit}*\n\n` : ""}` : "") +
-      `## L’essentiel\n\n${short}\n\n## Lien source\n\n${p.link}\n`;
-
-    fs.writeFileSync(path.join(outDir, `${slug}.md`), `---\n${yaml(frontmatter)}---\n\n${body}`, "utf-8");
-    console.log(`✅ Généré: ${slug} ${img ? "(image OK)" : "(pas d'image)"} — ${p.source}`);
-  }
-}
-
-main().catch((e) => { console.error(e); process.exit(1); });
+      <footer style="opacity:.6; font-size:12px; margin-top:32px;">
+        © {new Date().getFullYear()} — Actualités France
+      </footer>
+    </div>
+  </body>
+</html>
