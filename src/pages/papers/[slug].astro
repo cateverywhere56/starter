@@ -1,0 +1,48 @@
+---
+export async function getStaticPaths() {
+  // On découvre tous les .md générés
+  const modules = import.meta.glob('../../content/papers/*.md', { eager: true });
+
+  return Object.values(modules).map((m) => {
+    const mod: any = m as any;
+    const fm = mod.frontmatter || {};
+    const slug = (fm.permalink || '').replace(/^\/papers\//, ''); // ex: "2025-09-05-titre-paper"
+    return {
+      params: { slug },                  // ← route /papers/[slug]
+      props: { data: fm, Content: mod.Content }, // on passe frontmatter + contenu
+    };
+  });
+}
+
+const { data, Content } = Astro.props;
+---
+
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>{data.title} — Paper du jour</title>
+    <meta name="description" content={data.summary} />
+  </head>
+  <body style="font-family: system-ui; max-width: 760px; margin: 0 auto; padding: 24px;">
+    <header>
+      <a href="/" style="text-decoration:none;color:inherit"><h1>Paper du jour — IA</h1></a>
+    </header>
+
+    <article style="margin-top:24px;">
+      <h2 style="margin-bottom:4px;">{data.title}</h2>
+      <div style="opacity:.7;font-size:14px;">
+        Publié le {new Date(data.date).toLocaleDateString('fr-FR')} · {(data.tags || []).join(', ')}
+      </div>
+
+      <p style="margin-top:16px; white-space:pre-wrap;">{data.summary}</p>
+      {data.importance && <p style="margin-top:12px; font-style: italic;">Pourquoi c'est important — {data.importance}</p>}
+
+      <hr style="margin:24px 0;" />
+      <Content />
+
+      <p style="margin-top:24px;">
+        🔗 Source : <a href={data.sourceUrl} target="_blank" rel="noreferrer">{data.sourceUrl}</a>
+      </p>
+    </article>
+  </body>
+</html>
