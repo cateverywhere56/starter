@@ -1,7 +1,7 @@
 ---
 /**
- * Page détail : on génère toutes les routes /papers/[slug] à partir des MD.
- * Affiche le logo (favicon) et le nom de la source.
+ * Page détail : toutes les routes /papers/[slug] sont générées à partir des MD.
+ * Fond #D9D9D9, logo (favicon) + nom de la source, titre qui pointe vers la source.
  */
 export async function getStaticPaths() {
   const modules = import.meta.glob('../../content/papers/*.md', { eager: true });
@@ -20,13 +20,8 @@ export async function getStaticPaths() {
 
 const { data, Content } = Astro.props as { data: any; Content: any };
 
-// Helpers pour source
 const hostOf = (url: string) => {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return '';
-  }
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
 };
 const brandMap: Record<string, string> = {
   'francetvinfo.fr': 'Franceinfo',
