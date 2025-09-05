@@ -36,8 +36,14 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      - name: Build
-        run: npm run build
+      - name: Build (with debug)
+        run: |
+          npx astro --version
+          npm run build
+          echo "== After build (root) ==" && ls -la
+          echo "== Search for dist directories ==" && find . -type d -name dist -maxdepth 3 -print
+          echo "== Dist content at ./dist ==" && ls -la dist || true
+          test -d dist || (echo "❌ dist n'a pas été créé à la racine — voir les lignes ci-dessus"; exit 1)
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -45,7 +51,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: dist
 
   deploy:
     needs: build
