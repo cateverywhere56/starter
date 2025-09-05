@@ -2,13 +2,13 @@ name: Daily Paper du jour
 
 on:
   schedule:
-    - cron: '0 6 * * *'     # tous les jours à 06:00 UTC
-  workflow_dispatch: {}      # bouton "Run workflow"
+    - cron: '*/15 * * * *'   # toutes les 15 minutes (UTC)
+  workflow_dispatch: {}
   push:
-    branches: [ main ]       # déclenche aussi sur push
+    branches: [ main ]
 
 permissions:
-  contents: write            # nécessaire pour commit/push le contenu généré
+  contents: write
   pages: write
   id-token: write
 
@@ -31,10 +31,10 @@ jobs:
       - name: Install deps
         run: npm install
 
-      - name: Generate daily paper
+      - name: Generate news item(s)
         run: npm run generate
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}   # optionnel
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       - name: Commit generated content back to repo
         run: |
@@ -44,7 +44,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: add daily paper $(date -u +'%Y-%m-%d') [skip ci]"
+            git commit -m "chore: add news $(date -u +'%Y-%m-%d %H:%M') [skip ci]"
             git push
           fi
 
