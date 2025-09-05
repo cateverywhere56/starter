@@ -2,10 +2,10 @@ name: Daily Paper du jour
 
 on:
   schedule:
-    - cron: '0 6 * * *'   # tous les jours à 06:00 UTC
-  workflow_dispatch: {}    # permet de lancer manuellement
+    - cron: '0 6 * * *'
+  workflow_dispatch: {}
   push:
-    branches: [ main ]     # déclenche aussi sur push
+    branches: [ main ]
 
 permissions:
   contents: write
@@ -26,11 +26,10 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: '20'   # pas de cache ici
 
       - name: Install deps
-        run: npm install
+        run: npm install       # fonctionne sans lockfile
 
       - name: Generate daily paper
         env:
