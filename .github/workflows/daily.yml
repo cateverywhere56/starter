@@ -2,10 +2,10 @@ name: Daily Paper du jour
 
 on:
   schedule:
-    - cron: '0 6 * * *'   # tous les jours à 06:00 UTC (~08:00 Europe/Paris en hiver, 07:00 en été)
+    - cron: '0 6 * * *'   # tous les jours à 06:00 UTC
   workflow_dispatch: {}    # permet de lancer manuellement
   push:
-    branches: [ main ]     # déclenche aussi sur push (pratique pour le 1er déploiement)
+    branches: [ main ]     # déclenche aussi sur push
 
 permissions:
   contents: write
@@ -30,7 +30,7 @@ jobs:
           cache: 'npm'
 
       - name: Install deps
-        run: npm ci
+        run: npm install
 
       - name: Generate daily paper
         env:
