@@ -1,4 +1,9 @@
 import { defineConfig } from 'astro/config';
+
 export default defineConfig({
-  site: 'https://<ton-user>.github.io/<ton-repo>',
+  site: 'https://cateverywhere56.github.io/starter',
+  build: {
+    outDir: 'dist' // <-- on force le dossier de sortie
+  },
 });
+
