@@ -10,7 +10,7 @@ import slugify from "slugify";
 import matter from "gray-matter";
 
 const FEED_URL = "https://www.franceinfo.fr/titres.rss";
-const ITEMS_PER_DAY = 4;
+const ITEMS_PER_DAY = 6;
 
 /* ---------- Utils ---------- */
 function yaml(frontmatter) {
