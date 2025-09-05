@@ -1,7 +1,7 @@
 ---
 /**
  * Page détail : on génère toutes les routes /papers/[slug] à partir des MD.
- * Le titre renvoie aussi vers la source externe (Franceinfo).
+ * Affiche le logo (favicon) et le nom de la source.
  */
 export async function getStaticPaths() {
   const modules = import.meta.glob('../../content/papers/*.md', { eager: true });
@@ -19,6 +19,32 @@ export async function getStaticPaths() {
 }
 
 const { data, Content } = Astro.props as { data: any; Content: any };
+
+// Helpers pour source
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+};
+const brandMap: Record<string, string> = {
+  'francetvinfo.fr': 'Franceinfo',
+  'franceinfo.fr': 'Franceinfo',
+  'france24.com': 'France 24',
+  'rfi.fr': 'RFI',
+  '20minutes.fr': '20 Minutes',
+  'ouest-france.fr': 'Ouest-France',
+  'lemonde.fr': 'Le Monde',
+};
+const brandOf = (url: string) => {
+  const h = hostOf(url);
+  return brandMap[h] || h || 'Source';
+};
+const faviconOf = (url: string) => {
+  const h = hostOf(url);
+  return h ? `https://www.google.com/s2/favicons?domain=${h}&sz=64` : '';
+};
 ---
 <html lang="fr">
   <head>
@@ -27,61 +53,76 @@ const { data, Content } = Astro.props as { data: any; Content: any };
     <meta name="description" content={data.summary} />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
   </head>
-  <body style="font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 760px; margin: 0 auto; padding: 24px;">
-    <header>
-      <a href="/" style="text-decoration:none;color:inherit"><h1>Actualités — France</h1></a>
-    </header>
+  <body style="background:#D9D9D9; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; min-height:100vh;">
+    <div style="max-width: 860px; margin: 0 auto; padding: 24px;">
+      <header style="margin-bottom:8px;">
+        <a href="/" style="text-decoration:none;color:inherit"><h1 style="margin:0;">Actualités — France</h1></a>
+      </header>
 
-    <article style="margin-top:24px;">
-      <h2 style="margin-bottom:4px;">
-        <a
-          href={data.sourceUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          style="text-decoration:none; color:inherit;"
-          aria-label={`Ouvrir l’article source : ${data.title}`}
-        >
-          {data.title}
-        </a>
-      </h2>
-      <div style="opacity:.7;font-size:14px;">
-        Publié le {new Date(data.date).toLocaleDateString('fr-FR')}
-        { (data.tags?.length ? ` · ${data.tags.join(', ')}` : '') }
-      </div>
+      <article style="margin-top:16px; background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:20px; box-shadow:0 1px 2px rgba(0,0,0,.04);">
+        <h2 style="margin:0 0 6px 0; line-height:1.25;">
+          <a
+            href={data.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style="text-decoration:none; color:inherit;"
+            aria-label={`Ouvrir l’article source : ${data.title}`}
+          >
+            {data.title}
+          </a>
+        </h2>
 
-      {data.imageUrl && (
-        <figure style="margin:16px 0;">
-          <img
-            src={data.imageUrl}
-            alt={data.title}
-            style="display:block; width:100%; height:auto; max-height:520px; object-fit:contain; background:#f6f6f6; border-radius:10px;"
-          />
-          {data.imageCredit && (
-            <figcaption style="font-size:12px; opacity:.7; margin-top:6px;">
-              {data.imageCredit}
-            </figcaption>
+        <div style="display:flex; align-items:center; gap:10px; opacity:.85; font-size:14px; margin-bottom:12px;">
+          <span>{new Date(data.date).toLocaleDateString('fr-FR')}</span>
+          <span>·</span>
+          {faviconOf(data.sourceUrl) && (
+            <img
+              src={faviconOf(data.sourceUrl)}
+              alt=""
+              width="16"
+              height="16"
+              style="border-radius:4px; flex:0 0 16px;"
+            />
           )}
-        </figure>
-      )}
+          <a href={data.sourceUrl} target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:underline;">
+            {brandOf(data.sourceUrl)}
+          </a>
+        </div>
 
-      <section style="margin-top:12px;">
-        <h3 style="margin:0 0 8px 0;">L’essentiel</h3>
-        <p style="margin:0; white-space:pre-wrap;">{data.summary}</p>
-      </section>
+        {data.imageUrl && (
+          <figure style="margin:16px 0;">
+            <img
+              src={data.imageUrl}
+              alt={data.title}
+              style="display:block; width:100%; height:auto; max-height:520px; object-fit:contain; background:#f6f6f6; border-radius:10px;"
+            />
+            {data.imageCredit && (
+              <figcaption style="font-size:12px; opacity:.7; margin-top:6px;">
+                {data.imageCredit}
+              </figcaption>
+            )}
+          </figure>
+        )}
 
-      <hr style="margin:24px 0;" />
+        <section style="margin-top:12px;">
+          <h3 style="margin:0 0 8px 0;">L’essentiel</h3>
+          <p style="margin:0; white-space:pre-wrap;">{data.summary}</p>
+        </section>
 
-      <Content />
+        <hr style="margin:24px 0;" />
 
-      {data.sourceUrl && (
-        <p style="margin-top:24px;">
-          🔗 Lien source : <a href={data.sourceUrl} target="_blank" rel="noreferrer">{data.sourceUrl}</a>
-        </p>
-      )}
-    </article>
+        <Content />
 
-    <footer style="opacity:.6; font-size:12px; margin-top:32px;">
-      © {new Date().getFullYear()} — Actualités France
-    </footer>
+        {data.sourceUrl && (
+          <p style="margin-top:24px;">
+            🔗 Lien source : <a href={data.sourceUrl} target="_blank" rel="noreferrer">{data.sourceUrl}</a>
+          </p>
+        )}
+      </article>
+
+      <footer style="opacity:.6; font-size:12px; margin-top:24px;">
+        © {new Date().getFullYear()} — Actualités France
+      </footer>
+    </div>
   </body>
 </html>
