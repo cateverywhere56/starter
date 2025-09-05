@@ -1,26 +1,16 @@
 ---
-import fs from 'node:fs';
-import path from 'node:path';
-import matter from 'gray-matter';
-import Markdown from 'astro/components/Markdown.astro';
-
 const slugParam = Astro.params.slug;
 const slug = Array.isArray(slugParam) ? slugParam.join('/') : (slugParam || '');
 
-const dir = path.join(Astro.srcDir, 'content', 'papers');
-const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith('.md')) : [];
+const modules = import.meta.glob('../../content/papers/*.md', { eager: true });
+const all = Object.values(modules) as any[];
 
-let found = null;
-for (const f of files) {
-  const raw = fs.readFileSync(path.join(dir, f), 'utf-8');
-  const { data, content } = matter(raw);
-  if (data.permalink === `/papers/${slug}` || f.startsWith(slug)) {
-    found = { data, content };
-    break;
-  }
+let match = all.find((m: any) => m.frontmatter?.permalink === `/papers/${slug}`);
+if (!match) {
+  return Astro.redirect('/');
 }
-if (!found) return Astro.redirect('/');
-const { data, content } = found;
+
+const { frontmatter: data, Content } = match;
 ---
 <html lang="fr">
   <head>
@@ -40,7 +30,7 @@ const { data, content } = found;
       <p style="margin-top:16px; white-space:pre-wrap;">{data.summary}</p>
       {data.importance && <p style="margin-top:12px; font-style: italic;">Pourquoi c'est important — {data.importance}</p>}
       <hr style="margin:24px 0;" />
-      <Markdown>{content}</Markdown>
+      <Content />
       <p style="margin-top:24px;">
         🔗 Source: <a href={data.sourceUrl} target="_blank" rel="noreferrer">{data.sourceUrl}</a>
       </p>
