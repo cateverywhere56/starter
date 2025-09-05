@@ -34,7 +34,7 @@ const posts = Object.values(modules)
                 src={p.imageUrl}
                 alt={p.title}
                 loading="lazy"
-                style="width:100%; height:160px; object-fit:cover; border-radius:10px; margin-bottom:10px;"
+                style="width:100%; height:auto; max-height:260px; object-fit:contain; border-radius:10px; margin-bottom:10px;"
               />
             )}
             <h3 style="margin:0 0 6px 0;">{p.title}</h3>
