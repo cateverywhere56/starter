@@ -1,12 +1,13 @@
 ---
 /**
- * Liste des actualités générées (Markdown) via import.meta.glob.
+ * Liste des actualités (Markdown) via import.meta.glob.
+ * Chaque carte renvoie désormais vers la source externe (Franceinfo) : p.sourceUrl
  */
 const modules = import.meta.glob('../content/papers/*.md', { eager: true });
 
 const posts = Object.values(modules)
   .map((m: any) => m.frontmatter)
-  .filter((fm: any) => fm && fm.title && fm.permalink)
+  .filter((fm: any) => fm && fm.title && fm.sourceUrl) // on exige une source
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 ---
 <html lang="fr">
@@ -28,13 +29,19 @@ const posts = Object.values(modules)
     ) : (
       <main style="display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); margin-top:24px;">
         {posts.map((p: any) => (
-          <a href={p.permalink} style="text-decoration:none; color:inherit; border:1px solid #eee; border-radius:12px; padding:16px; display:block;">
+          <a
+            href={p.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Ouvrir l’article source : ${p.title}`}
+            style="text-decoration:none; color:inherit; border:1px solid #eee; border-radius:12px; padding:16px; display:block;"
+          >
             {p.imageUrl && (
               <img
                 src={p.imageUrl}
                 alt={p.title}
                 loading="lazy"
-                style="width:100%; height:auto; max-height:260px; object-fit:contain; border-radius:10px; margin-bottom:10px;"
+                style="display:block; width:100%; height:auto; max-height:260px; object-fit:contain; background:#f6f6f6; border-radius:10px; margin-bottom:10px;"
               />
             )}
             <h3 style="margin:0 0 6px 0;">{p.title}</h3>
