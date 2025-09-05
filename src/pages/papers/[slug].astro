@@ -1,6 +1,7 @@
 ---
 /**
  * Page détail : on génère toutes les routes /papers/[slug] à partir des MD.
+ * Le titre renvoie aussi vers la source externe (Franceinfo).
  */
 export async function getStaticPaths() {
   const modules = import.meta.glob('../../content/papers/*.md', { eager: true });
@@ -32,7 +33,17 @@ const { data, Content } = Astro.props as { data: any; Content: any };
     </header>
 
     <article style="margin-top:24px;">
-      <h2 style="margin-bottom:4px;">{data.title}</h2>
+      <h2 style="margin-bottom:4px;">
+        <a
+          href={data.sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style="text-decoration:none; color:inherit;"
+          aria-label={`Ouvrir l’article source : ${data.title}`}
+        >
+          {data.title}
+        </a>
+      </h2>
       <div style="opacity:.7;font-size:14px;">
         Publié le {new Date(data.date).toLocaleDateString('fr-FR')}
         { (data.tags?.length ? ` · ${data.tags.join(', ')}` : '') }
@@ -40,7 +51,11 @@ const { data, Content } = Astro.props as { data: any; Content: any };
 
       {data.imageUrl && (
         <figure style="margin:16px 0;">
-          <img src={data.imageUrl} alt={data.title} style="width:100%;  max-height:520px; object-fit:contain; background:#f6f6f6; border-radius:10px;" />
+          <img
+            src={data.imageUrl}
+            alt={data.title}
+            style="display:block; width:100%; height:auto; max-height:520px; object-fit:contain; background:#f6f6f6; border-radius:10px;"
+          />
           {data.imageCredit && (
             <figcaption style="font-size:12px; opacity:.7; margin-top:6px;">
               {data.imageCredit}
