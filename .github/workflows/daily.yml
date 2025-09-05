@@ -27,14 +27,24 @@ jobs:
         run: |
           echo "PWD:" && pwd
           echo "List root:" && ls -la
+          echo "Show package.json (first lines):"
+          head -n 50 package.json || true
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'   # ⚠️ pas de cache ici
+          node-version: '20'
 
-      - name: Install deps
-        run: npm install       # pas besoin de lockfile
+      - name: Ensure package.json exists
+        run: |
+          test -f package.json || (echo "❌ package.json introuvable à la racine" && exit 1)
+
+      - name: Install deps (with fallbacks)
+        run: |
+          npm -v && node -v
+          npm cache clean --force
+          npm install --no-audit --no-fund || \
+          npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Generate daily paper
         env:
@@ -42,6 +52,8 @@ jobs:
         run: npm run generate
 
       - name: Build
+        env:
+          CI: false
         run: npm run build
 
       - name: Setup Pages
