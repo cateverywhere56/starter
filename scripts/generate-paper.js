@@ -1,9 +1,8 @@
 // scripts/generate-paper.js
-// Flux mixte FR • 1 actu par exécution (toutes les 15 min)
+// Flux mixte FR • 1 actu par exécution (toutes les 15 min).
 // Choisit la 1ʳᵉ actu NON PUBLIÉE.
 // Image = og:image de l’article si possible (même si déjà vue ailleurs).
-// Fallback Openverse filtré (anti-meme/illustration, dimensions minimales, providers photo),
-// et dédoublonnage des images Openverse (pas d'images identiques).
+// Fallback Openverse filtré + anti-doublons (Openverse seulement).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -13,8 +12,8 @@ import slugify from "slugify";
 import matter from "gray-matter";
 
 /* ---- CONFIG ---- */
-const ITEMS_PER_RUN = 1;                 // 1 actu par exécution (cron toutes les 15 min)
-const OPENVERSE_PAGE_SIZE = 12;          // nb maximal de candidates Openverse à tester
+const ITEMS_PER_RUN = 1;                 // 1 actu par exécution
+const OPENVERSE_PAGE_SIZE = 12;          // nb max d’images candidates Openverse
 const FEEDS = [
   { name: "Franceinfo",    url: "https://www.francetvinfo.fr/titres.rss" },
   { name: "France 24",     url: "https://www.france24.com/fr/rss" },
@@ -44,7 +43,9 @@ function normalizeUrl(u) {
   try {
     const x = new URL(u);
     return (x.origin + x.pathname).replace(/\/+$/, "").toLowerCase();
-  } catch { return String(u).toLowerCase(); }
+  } catch {
+    return String(u).toLowerCase();
+  }
 }
 const FR_STOP = new Set([
   "le","la","les","un","une","des","de","du","d","l","au","aux","à","a",
@@ -108,7 +109,9 @@ async function fetchOgImage(articleUrl) {
       .filter(Boolean);
     if (!candidates.length) return null;
     return { url: candidates[0], credit: "Image de l’article — droits possiblement réservés", source: articleUrl };
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /* ---- Filtres Openverse (pertinence) ---- */
@@ -144,11 +147,11 @@ async function findImageOpenverse(query, avoidFP) {
         if (it.category && String(it.category).toLowerCase() !== "photograph") return false;
         if (it.width && it.height && (it.width < 600 || it.height < 400)) return false;
         const fp = normalizeUrl(url);
-        if (avoidFP.has(fp)) return false; // déjà utilisée
+        if (avoidFP.has(fp)) return false;
         return true;
       });
 
-      // On privilégie les providers photo fiables
+      // Priorité aux providers photo fiables
       results.sort((a, b) => {
         const ap = PREFERRED_PROVIDERS.has(String(a.provider).toLowerCase()) ? 0 : 1;
         const bp = PREFERRED_PROVIDERS.has(String(b.provider).toLowerCase()) ? 0 : 1;
@@ -165,13 +168,13 @@ async function findImageOpenverse(query, avoidFP) {
         };
       }
     } catch {
-      // on tente la variante suivante
+      // on essaie la variante suivante
     }
   }
   return null;
 }
 
-/* ---- Sélection variée par source (ordre), puis 1re NON PUBLIÉE ---- */
+/* ---- Sélection variée (ordre) puis 1ʳᵉ NON PUBLIÉE ---- */
 function pickMixed(items, count) {
   items.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
   const bySource = new Map();
@@ -201,7 +204,6 @@ function pickMixed(items, count) {
       sources.splice(idx % sources.length, 1);
     }
   }
-  // compléter si besoin
   if (picks.length < count * 6) {
     const set = new Set(picks.map((x) => x.link));
     for (const it of items) {
@@ -219,4 +221,98 @@ async function main() {
   for (const f of FEEDS) {
     try {
       const entries = await fetchFeed(f.url);
-      for (const e of ent
+      for (const e of entries) {
+        const item = toItem(e, f.name);
+        if (item.title && item.link) all.push(item);
+      }
+    } catch (err) {
+      console.error("Feed error:", f.name, f.url, String(err).slice(0, 120));
+    }
+  }
+  if (!all.length) throw new Error("Aucune actualité trouvée sur les flux configurés.");
+
+  // 2) Dé-dup des articles (par lien normalisé)
+  const seenLinks = new Set();
+  const unique = [];
+  for (const it of all) {
+    const key = normalizeUrl(it.link);
+    if (seenLinks.has(key)) continue;
+    seenLinks.add(key);
+    unique.push(it);
+  }
+
+  const outDir = path.join("src", "content", "papers");
+  fs.mkdirSync(outDir, { recursive: true });
+
+  // 3) Construire une liste “mixte” et choisir la 1ʳᵉ NON PUBLIÉE
+  const mixed = pickMixed(unique, ITEMS_PER_RUN);
+  const candidates = [...mixed, ...unique];
+  const picks = [];
+  for (const it of candidates) {
+    const date = new Date(it.dateISO);
+    const yyyy = date.getUTCFullYear();
+    const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(date.getUTCDate()).padStart(2, "0");
+    const niceDate = `${yyyy}-${mm}-${dd}`;
+    const slug = `${niceDate}-${slugify(it.title, { lower: true, strict: true })}`;
+    const target = path.join(outDir, `${slug}.md`);
+    if (!fs.existsSync(target)) {
+      picks.push({ it, slug, date });
+      if (picks.length >= ITEMS_PER_RUN) break;
+    }
+  }
+
+  if (!picks.length) {
+    console.log("Aucune nouvelle actu à ajouter (tout le récent est déjà publié).");
+    return;
+  }
+
+  // 4) Dé-dup images (inter-jours + intra-run) — sur Openverse uniquement
+  const existingFP = getExistingImageFPs();
+  const usedThisRun = new Set();
+
+  for (const { it: p, slug, date } of picks) {
+    const short = cleanText(p.summary).split(/(?<=[.!?])\s+/).slice(0, 2).join(" ");
+
+    // Image : on privilégie l’og:image (même si déjà utilisée ailleurs)
+    let img = await fetchOgImage(p.link);
+    let fp = img?.url ? normalizeUrl(img.url) : null;
+
+    // Si pas d’og:image → Openverse filtré + anti-doublon
+    if (!img) {
+      const alt = await findImageOpenverse(p.title, new Set([...existingFP, ...usedThisRun]));
+      if (alt) { img = alt; fp = normalizeUrl(alt.url); }
+    }
+
+    // Si l’image vient d’Openverse, on évite les doublons
+    if (img && img.credit?.toLowerCase().includes("openverse")) {
+      if (fp && (existingFP.has(fp) || usedThisRun.has(fp))) {
+        img = null; fp = null;
+      }
+    }
+
+    if (fp) usedThisRun.add(fp);
+
+    const frontmatter = {
+      title: p.title,
+      date: date.toISOString(),
+      publishedDate: date.toLocaleDateString("fr-FR", { year: "numeric", month: "long", day: "numeric" }),
+      summary: short,
+      importance: "",
+      sourceUrl: p.link,
+      tags: ["France", "Actualité", p.source],
+      permalink: `/papers/${slug}`,
+      imageUrl: img?.url || "",
+      imageCredit: img ? `${img.credit}${img.source ? " — " + img.source : ""}` : ""
+    };
+
+    const body =
+      (img?.url ? `![${p.title}](${img.url})\n\n${frontmatter.imageCredit ? `*Crédit image : ${frontmatter.imageCredit}*\n\n` : ""}` : "") +
+      `## L’essentiel\n\n${short}\n\n## Lien source\n\n${p.link}\n`;
+
+    fs.writeFileSync(path.join(outDir, `${slug}.md`), `---\n${yaml(frontmatter)}---\n\n${body}`, "utf-8");
+    console.log(`✅ Généré: ${slug} ${img ? "(image OK)" : "(pas d'image)"} — ${p.source}`);
+  }
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });
