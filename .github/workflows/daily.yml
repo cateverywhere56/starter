@@ -2,10 +2,10 @@ name: Daily Paper du jour
 
 on:
   schedule:
-    - cron: '0 6 * * *'      # exécution quotidienne
-  workflow_dispatch: {}       # bouton "Run workflow"
+    - cron: '0 6 * * *'
+  workflow_dispatch: {}
   push:
-    branches: [ main ]        # déclenche aussi sur push
+    branches: [ main ]
 
 permissions:
   contents: write
@@ -27,13 +27,35 @@ jobs:
         run: |
           echo "== PWD ==" && pwd
           echo "== LS root ==" && ls -la
-          echo "== Show package.json (head) ==" && head -n 40 package.json || true
+          echo "== HEAD package.json ==" && head -n 40 package.json || true
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'   # pas de cache pour éviter l'avertissement de lockfile
+          node-version: '20'
 
-      - name: Ensure package.json exists
+      - name: Install deps (no lockfile required)
         run: |
-          test -f package.json || (echo "❌ package.json i
+          npm -v && node -v
+          npm install --no-audit --no-fund || npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Generate daily paper
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}   # optionnel
+        run: npm run generate
+
+      - name: Build
+        run: |
+          npm run build
+          echo "== After build =="
+          ls -la
+          echo "== Dist content =="
+          ls -la dist || true
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path
