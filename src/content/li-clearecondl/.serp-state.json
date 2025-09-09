@@ -11,14 +11,14 @@
     "\"CleaReconDL\"": 0
   },
   "google": {
-    "\"#cleareconDL\"": 0,
-    "\"CleaRecon DL\"": 0,
-    "\"CleaReconDL\"": 0
+    "\"#cleareconDL\"": 1,
+    "\"CleaRecon DL\"": 1,
+    "\"CleaReconDL\"": 1
   },
   "yahoo": {
-    "\"#cleareconDL\"": 2,
-    "\"CleaRecon DL\"": 2,
-    "\"CleaReconDL\"": 2
+    "\"#cleareconDL\"": 3,
+    "\"CleaRecon DL\"": 3,
+    "\"CleaReconDL\"": 3
   },
   "fallback": {
     "step": 4
