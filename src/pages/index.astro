@@ -1,14 +1,27 @@
 ---
 /**
- * Page d’accueil : liste des actus générées (Markdown).
- * Titre + image ouvrent l’article source. Fond #D9D9D9. Logo de la source.
+ * Page d’accueil : actus (colonne principale) + CleaReconDL (colonne gauche).
+ * - Import des contenus Markdown générés par les scripts.
+ * - Colonne gauche = tout ce qu’on trouve (pas de filtre "aujourd'hui").
  */
-const modules = import.meta.glob('../content/papers/*.md', { eager: true });
+
+const modules = import.meta.glob('/src/content/papers/*.md', { eager: true });
+
+// 👉 importe des DEUX chemins possibles (casse différente) pour la colonne gauche
+const clRaw = {
+  ...import.meta.glob('/src/content/clearecondl/*.md', { eager: true }),
+  ...import.meta.glob('/src/content/cleareconDL/*.md', { eager: true }),
+};
 
 const posts = Object.values(modules)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+const leftPosts = Object.values(clRaw)
+  .map((m) => (m as any).frontmatter)
+  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
+  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()); // pas de slice ici
 
 function hostOf(url: string) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
@@ -29,6 +42,10 @@ function faviconOf(url: string) {
   const h = hostOf(url);
   return h ? `https://www.google.com/s2/favicons?domain=${h}&sz=64` : '';
 }
+function truncate(s: string, n = 160) {
+  const x = (s || '').trim();
+  return x.length > n ? x.slice(0, n - 1) + '…' : x;
+}
 ---
 <html lang="fr">
   <head>
@@ -37,60 +54,122 @@ function faviconOf(url: string) {
     <meta name="viewport" content="width=device-width,initial-scale=1" />
   </head>
   <body style="background:#D9D9D9; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; min-height:100vh;">
-    <div style="max-width: 1080px; margin: 0 auto; padding: 24px;">
+    <div style="max-width: 1180px; margin: 0 auto; padding: 24px;">
       <header>
         <h1 style="margin:0 0 8px 0;">Actualités — France</h1>
         <p style="opacity:.7;margin:0;">Une info du jour, en français.</p>
       </header>
 
-      {
-        posts.length === 0
-          ? (
-            <p style="margin-top:16px; opacity:.8;">
-              Aucune actualité pour l’instant. Relance le workflow et recharge la page.
-            </p>
-          )
-          : (
-            <main style="display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); margin-top:24px;">
-              {posts.map((p: any) => (
-                <a
-                  href={p.sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`Ouvrir l’article source : ${p.title}`}
-                  style="text-decoration:none; color:inherit; background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:16px; display:block; box-shadow:0 1px 2px rgba(0,0,0,.04);"
-                >
-                  {p.imageUrl && (
-                    <img
-                      src={p.imageUrl}
-                      alt={p.title}
-                      loading="lazy"
-                      style="display:block; width:100%; height:auto; max-height:260px; object-fit:contain; background:#f6f6f6; border-radius:10px; margin-bottom:10px;"
-                    />
-                  )}
-                  <h3 style="margin:0 0 6px 0; line-height:1.25;">{p.title}</h3>
-                  <div style="opacity:.7; font-size: 14px; margin-bottom:8px;">
-                    {new Date(p.date).toLocaleDateString('fr-FR')}
-                  </div>
-                  <p style="margin-top:0; opacity:.9;">{p.summary}</p>
+      <div style="display:grid; grid-template-columns: 320px 1fr; gap: 20px; align-items:start; margin-top:24px;">
+        <!-- Colonne gauche : CleaReconDL -->
+        <aside style="position:sticky; top:16px; align-self:start;">
+          <section style="background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04);">
+            <h2 style="margin:0 0 6px 0; font-size:18px;">En ce moment : <span style="white-space:nowrap;">CleaRecon&nbsp;DL</span></h2>
+            <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{leftPosts.length} élément(s)</div>
 
-                  <div style="display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; opacity:.9;">
-                    {faviconOf(p.sourceUrl) && (
+            {
+              leftPosts.length === 0
+                ? (
+                  <p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">
+                    Rien pour l’instant. Lance <code>npm run generate:clearecondl</code> puis rebuild.
+                  </p>
+                )
+                : (
+                  <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow:auto;">
+                    {leftPosts.map((p: any) => (
+                      <li>
+                        <a
+                          href={p.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style="display:flex; gap:10px; text-decoration:none; color:inherit; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px;"
+                          aria-label={`Ouvrir : ${p.title}`}
+                        >
+                          {p.imageUrl ? (
+                            <img
+                              src={p.imageUrl}
+                              alt=""
+                              loading="lazy"
+                              width="64"
+                              height="64"
+                              style="flex:0 0 64px; width:64px; height:64px; object-fit:cover; border-radius:8px; background:#f6f6f6;"
+                            />
+                          ) : (
+                            <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6; display:flex; align-items:center; justify-content:center; font-size:12px; color:#777;">
+                              {faviconOf(p.sourceUrl) ? <img src={faviconOf(p.sourceUrl)} alt="" width="20" height="20" /> : '—'}
+                            </div>
+                          )}
+                          <div style="min-width:0;">
+                            <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">
+                              {p.title}
+                            </div>
+                            <div style="opacity:.75; font-size:12px; margin-bottom:4px;">
+                              {new Date(p.date).toLocaleDateString('fr-FR')}
+                              {hostOf(p.sourceUrl) ? ` · ${hostOf(p.sourceUrl)}` : ''}
+                            </div>
+                            <div style="font-size:13px; opacity:.9;">
+                              {truncate(p.summary, 160)}
+                            </div>
+                          </div>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )
+            }
+          </section>
+        </aside>
+
+        <!-- Colonne principale : actus -->
+        {
+          posts.length === 0
+            ? (
+              <p style="margin-top:6px; opacity:.8;">
+                Aucune actualité pour l’instant. Relance le workflow et recharge la page.
+              </p>
+            )
+            : (
+              <main style="display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(280px,1fr));">
+                {posts.map((p: any) => (
+                  <a
+                    href={p.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Ouvrir l’article source : ${p.title}`}
+                    style="text-decoration:none; color:inherit; background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:16px; display:block; box-shadow:0 1px 2px rgba(0,0,0,.04);"
+                  >
+                    {p.imageUrl && (
                       <img
-                        src={faviconOf(p.sourceUrl)}
-                        alt=""
-                        width="16"
-                        height="16"
-                        style="border-radius:4px; flex:0 0 16px;"
+                        src={p.imageUrl}
+                        alt={p.title}
+                        loading="lazy"
+                        style="display:block; width:100%; height:auto; max-height:260px; object-fit:contain; background:#f6f6f6; border-radius:10px; margin-bottom:10px;"
                       />
                     )}
-                    <span>{brandOf(p.sourceUrl)}</span>
-                  </div>
-                </a>
-              ))}
-            </main>
-          )
-      }
+                    <h3 style="margin:0 0 6px 0; line-height:1.25;">{p.title}</h3>
+                    <div style="opacity:.7; font-size: 14px; margin-bottom:8px;">
+                      {new Date(p.date).toLocaleDateString('fr-FR')}
+                    </div>
+                    <p style="margin-top:0; opacity:.9;">{p.summary}</p>
+
+                    <div style="display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; opacity:.9;">
+                      {faviconOf(p.sourceUrl) && (
+                        <img
+                          src={faviconOf(p.sourceUrl)}
+                          alt=""
+                          width="16"
+                          height="16"
+                          style="border-radius:4px; flex:0 0 16px;"
+                        />
+                      )}
+                      <span>{brandOf(p.sourceUrl)}</span>
+                    </div>
+                  </a>
+                ))}
+              </main>
+            )
+        }
+      </div>
 
       <footer style="opacity:.6; font-size:12px; margin-top:32px;">
         © {new Date().getFullYear()} — Actualités France
@@ -98,3 +177,4 @@ function faviconOf(url: string) {
     </div>
   </body>
 </html>
+
