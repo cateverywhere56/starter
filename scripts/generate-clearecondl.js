@@ -1,8 +1,5 @@
 // scripts/generate-clearecondl.js
-// Colonne “CleaRecon DL / CleareconDL / #clearecondl” — v1.5
-// - Résout les redirections (news.google.com / bing.com/news / t.co, etc.)
-// - Filtre LinkedIn : n’accepte que des POSTS (activity / posts / profil + recent-activity/posts)
-// - Backfill (pas de filtre de date) + dédous après résolution
+// v1.6 — CleaRecon DL column: dedup, redirects resolve, strict LinkedIn posts, YouTube search kept.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -11,15 +8,15 @@ import { parseStringPromise } from "xml2js";
 import slugify from "slugify";
 
 /* ---- CONFIG ---- */
-const OUT_DIR_MAIN = path.join("src", "content", "clearecondl");
-const OUT_DIR_ALT  = path.join("src", "content", "cleareconDL");
-const OUT_DIRS = [OUT_DIR_MAIN, OUT_DIR_ALT];
+const OUT_DIRS = [
+  path.join("src", "content", "clearecondl"),
+  path.join("src", "content", "cleareconDL"),
+];
 
-const REQUEST_TIMEOUT_MS = 12_000;
+const REQUEST_TIMEOUT_MS = 12000;
 const MAX_RETRIES = 2;
-const USER_AGENT = "clearecondl/1.5 (+https://github.com/)";
+const USER_AGENT = "clearecondl/1.6 (+https://github.com/)";
 
-// Requêtes (variantes)
 const QUERIES = [
   `"CleaRecon DL"`,
   `"CleareconDL"`,
@@ -30,24 +27,24 @@ const QUERIES = [
   `"ClearEcon DL"`
 ];
 
-// (optionnel) chaînes YouTube à pinner, format: YT_CHANNEL_IDS="UCxxxx,UCyyyy"
+// YouTube: optionnel — chaînes à scanner en plus de la recherche
 const YT_CHANNEL_IDS = (process.env.YT_CHANNEL_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
 
-// (optionnel) LinkedIn via RSSHub (pages ENTREPRISE uniquement)
+// LinkedIn via RSSHub (optionnel, pages entreprise)
 const RSSHUB_BASE = (process.env.RSSHUB_BASE || "").replace(/\/+$/, "");
 const LINKEDIN_COMPANY_IDS = (process.env.LINKEDIN_COMPANY_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
 
-// (optionnel) borne d’écriture
+// Limite écriture (optionnel)
 const MAX_ITEMS = parseInt(process.env.CLEARECONDL_MAX_ITEMS || "", 10) || Infinity;
 
-/* ---- SEARCH FEEDS ---- */
+/* ---- FEEDS ---- */
 const SEARCH_FEEDS = [
-  { name: "Google News (web)",     url: "https://news.google.com/rss/search?q={q}&hl=fr&gl=FR&ceid=FR:fr" },
-  { name: "Bing News (web)",       url: "https://www.bing.com/news/search?q={q}&format=RSS" },
-  { name: "Google News (LinkedIn)",url: "https://news.google.com/rss/search?q={q}+site%3Alinkedin.com&hl=fr&gl=FR&ceid=FR:fr" },
-  { name: "Bing News (LinkedIn)",  url: "https://www.bing.com/news/search?q={q}+site%3Alinkedin.com&format=RSS" },
-  { name: "YouTube Search",        url: "https://www.youtube.com/feeds/videos.xml?search_query={q}" },
-  { name: "Reddit",                url: "https://www.reddit.com/search.rss?q={q}" },
+  { name: "Google News (web)",      url: "https://news.google.com/rss/search?q={q}&hl=fr&gl=FR&ceid=FR:fr" },
+  { name: "Bing News (web)",        url: "https://www.bing.com/news/search?q={q}&format=RSS" },
+  { name: "Google News (LinkedIn)", url: "https://news.google.com/rss/search?q={q}+site%3Alinkedin.com&hl=fr&gl=FR&ceid=FR:fr" },
+  { name: "Bing News (LinkedIn)",   url: "https://www.bing.com/news/search?q={q}+site%3Alinkedin.com&format=RSS" },
+  { name: "YouTube Search",         url: "https://www.youtube.com/feeds/videos.xml?search_query={q}" },
+  { name: "Reddit",                 url: "https://www.reddit.com/search.rss?q={q}" },
 ];
 
 /* ---- utils ---- */
@@ -72,24 +69,13 @@ async function timedFetch(url, opts = {}, retries = MAX_RETRIES) {
     }
   }
 }
-function cleanText(s = "") {
-  return String(s).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-function normalizeUrl(u) {
-  try {
-    const x = new URL(u);
-    return (x.origin + x.pathname).replace(/\/+$/, "").toLowerCase();
-  } catch { return String(u).toLowerCase(); }
-}
-function hostnameOf(u) {
-  try { return new URL(u).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; }
-}
+function cleanText(s = "") { return String(s).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(); }
+function normalizeUrl(u) { try { const x = new URL(u); return (x.origin + x.pathname).replace(/\/+$/, "").toLowerCase(); } catch { return String(u).toLowerCase(); } }
+function hostOf(u) { try { return new URL(u).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } }
 function yaml(frontmatter) {
   const esc = (v) => String(v).replace(/"/g, '\\"');
   return Object.entries(frontmatter)
-    .map(([k, v]) => Array.isArray(v)
-      ? `${k}: [${v.map((x) => `"${esc(x)}"`).join(", ")}]`
-      : `${k}: "${esc(v)}"`).join("\n") + "\n";
+    .map(([k, v]) => Array.isArray(v) ? `${k}: [${v.map((x) => `"${esc(x)}"`).join(", ")}]` : `${k}: "${esc(v)}"`).join("\n") + "\n";
 }
 
 /* ---- RSS ---- */
@@ -105,9 +91,8 @@ async function fetchFeed(url) {
 function toItem(e, sourceName) {
   const title = cleanText(e.title?.["#text"] || e.title);
   const link =
-    typeof e.link === "string"
-      ? e.link
-      : e.link?.href || (Array.isArray(e.link) ? e.link.find(x => x?.href)?.href || e.link[0] : null);
+    typeof e.link === "string" ? e.link :
+    e.link?.href || (Array.isArray(e.link) ? e.link.find(x => x?.href)?.href || e.link[0] : null);
   const pageUrl = link || e.id || "";
   const summary = cleanText(e.description || e.summary || e.content?.["#text"] || e.content);
   const dateISO = (() => {
@@ -118,26 +103,18 @@ function toItem(e, sourceName) {
   return { title, summary, link: pageUrl, dateISO, source: sourceName };
 }
 
-/* ---- Résolution d'URL finale (suivre redirections) ---- */
-const REDIR_HOSTS = new Set([
-  "news.google.com", "www.google.com", "google.com",
-  "www.bing.com", "bing.com",
-  "t.co", "lnkd.in", "l.facebook.com", "lm.facebook.com"
-]);
-
+/* ---- Redirection ---- */
+const REDIR_HOSTS = new Set(["news.google.com","google.com","www.google.com","www.bing.com","bing.com","t.co","lnkd.in","l.facebook.com","lm.facebook.com"]);
 async function resolveFinalUrl(u) {
   try {
     const res = await timedFetch(u, { method: "GET", headers: { Accept: "text/html" } });
-    // node-fetch suit déjà les redirections; res.url est l’URL finale
-    return res.url || u;
-  } catch {
-    return u;
-  }
+    return res.url || u; // node-fetch suit les redirections
+  } catch { return u; }
 }
 function needsResolve(u, sourceName = "") {
-  const h = hostnameOf(u);
+  const h = hostOf(u);
   if (REDIR_HOSTS.has(h)) return true;
-  if (/linkedIn/i.test(sourceName)) return true;
+  if (/LinkedIn/i.test(sourceName)) return true;
   return false;
 }
 
@@ -150,42 +127,59 @@ async function fetchOgImage(articleUrl) {
     const pick = (re) => html.match(re)?.[1];
     const og = pick(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
     const tw = pick(/<meta[^>]+name=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/i);
-    const cands = [og, tw].filter(Boolean).map(u => { try { return new URL(u, articleUrl).href; } catch { return null; } }).filter(Boolean);
-    return cands[0] || null;
+    const c = [og, tw].filter(Boolean).map(u => { try { return new URL(u, articleUrl).href; } catch { return null; } }).filter(Boolean);
+    return c[0] || null;
   } catch { return null; }
 }
 
-/* ---- Filtrage dur LinkedIn + mots-clés ---- */
-const STRICT_KEYWORD_RE = /\b(clearecondl|clea\s*recon\s*dl)\b/i;
+/* ---- Matching ---- */
+const KEY_PATTERNS = [
+  /\bclearecondl\b/i,
+  /#\s*clearecondl\b/i,
+  /\bclea\s*recon\s*dl\b/i,
+  /\bclearecon\b/i,
+  /\bclear\s*recon\b/i,
+];
+function anyKeyMatch(text) { return KEY_PATTERNS.some(re => re.test(text)); }
+
 function classifyLinkedIn(u) {
   try {
-    const { pathname } = new URL(u);
-    const p = pathname.toLowerCase();
+    const p = new URL(u).pathname.toLowerCase();
     if (p.includes("/feed/update/urn:li:activity:")) return "post";
     if (p.startsWith("/posts/")) return "post";
     if (p.startsWith("/in/")) {
       if (p.includes("/recent-activity/") && p.includes("/posts/")) return "profile-posts";
       return "profile";
     }
-    if (p.startsWith("/company/"))  return "company";
-    if (p.startsWith("/jobs"))      return "jobs";
-    if (p.startsWith("/learning"))  return "learning";
-    if (p.startsWith("/pulse/"))    return "pulse";
+    if (p.startsWith("/company/")) return "company";
+    if (p.startsWith("/jobs")) return "jobs";
+    if (p.startsWith("/learning")) return "learning";
+    if (p.startsWith("/pulse/")) return "pulse";
     return "other";
   } catch { return "none"; }
 }
-function isRelevantItem(it) {
-  const text = `${it.title || ""} ${it.summary || ""} ${it.link || ""}`.toLowerCase();
-  if (!STRICT_KEYWORD_RE.test(text)) return false;
 
-  const host = hostnameOf(it.link);
+function isRelevant(it) {
+  const host = hostOf(it.link);
+  const text = `${it.title || ""} ${it.summary || ""} ${it.link || ""}`;
+
+  // LinkedIn: garder UNIQUEMENT les vrais posts, même si le titre ne contient pas le mot-clé
   if (host.endsWith("linkedin.com")) {
     const cls = classifyLinkedIn(it.link);
-    if (!(cls === "post" || cls === "profile-posts")) return false;
+    return (cls === "post" || cls === "profile-posts");
   }
-  return true;
+
+  // YouTube: si ça vient de "YouTube Search" => déjà filtré par la requête
+  if (host.includes("youtube.com") || host === "youtu.be") {
+    if (/YouTube/i.test(it.source)) return true;
+    return anyKeyMatch(text);
+  }
+
+  // Autres: mot-clé requis
+  return anyKeyMatch(text);
 }
 
+/* ---- FS helpers ---- */
 function ensureDirs() { for (const d of OUT_DIRS) fs.mkdirSync(d, { recursive: true }); }
 function readExisting() {
   const seen = new Set();
@@ -201,6 +195,7 @@ function readExisting() {
   return seen;
 }
 
+/* ---- MAIN ---- */
 async function main() {
   ensureDirs();
   const seenExisting = readExisting();
@@ -221,8 +216,7 @@ async function main() {
       }
     }
   }
-
-  // 2) + YouTube (chaînes)
+  // + YouTube channels (optionnel)
   for (const ch of YT_CHANNEL_IDS) {
     const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(ch)}`;
     try {
@@ -235,8 +229,7 @@ async function main() {
       console.error("YouTube channel feed error:", ch, String(err).slice(0, 160));
     }
   }
-
-  // 3) + LinkedIn via RSSHub (entreprises)
+  // + LinkedIn via RSSHub (optionnel)
   if (RSSHUB_BASE && LINKEDIN_COMPANY_IDS.length) {
     for (const id of LINKEDIN_COMPANY_IDS) {
       const url = `${RSSHUB_BASE}/linkedin/company/${encodeURIComponent(id)}/posts`;
@@ -252,7 +245,7 @@ async function main() {
     }
   }
 
-  // 4) Dé-dup préliminaire (lien tel-quel)
+  // 2) Dé-dup (brut)
   const prelim = [];
   const seen1 = new Set();
   for (const it of raw) {
@@ -262,13 +255,10 @@ async function main() {
     prelim.push(it);
   }
 
-  // 5) Résoudre l’URL FINALE si besoin, puis re-dédoublonner
+  // 3) Résoudre URL finale si nécessaire, puis re-dédoublonner
   const resolved = [];
   for (const it of prelim) {
-    let finalLink = it.link;
-    if (needsResolve(it.link, it.source)) {
-      finalLink = await resolveFinalUrl(it.link);
-    }
+    const finalLink = needsResolve(it.link, it.source) ? await resolveFinalUrl(it.link) : it.link;
     resolved.push({ ...it, link: finalLink });
   }
   const uniq = [];
@@ -280,13 +270,13 @@ async function main() {
     uniq.push(it);
   }
 
-  // 6) Filtrage strict (mots-clés + LinkedIn posts uniquement)
-  const filtered = uniq.filter(isRelevantItem);
+  // 4) Filtrage (LinkedIn posts OK, YouTube search OK, sinon mots-clés)
+  const filtered = uniq.filter(isRelevant);
 
-  // 7) Tri chrono desc
+  // 5) Tri chrono desc
   filtered.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
 
-  // 8) Écriture (dans les 2 dossiers)
+  // 6) Écriture
   let created = 0;
   for (const it of filtered) {
     if (created >= MAX_ITEMS) break;
@@ -297,8 +287,8 @@ async function main() {
     const yyyy = d.getUTCFullYear();
     const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
     const dd = String(d.getUTCDate()).padStart(2, "0");
-    const niceDate = `${yyyy}-${mm}-${dd}`;
-    const base = `${niceDate}-${slugify(it.title, { lower: true, strict: true }).slice(0, 80)}`;
+    const base = `${yyyy}-${mm}-${dd}-${slugify(it.title, { lower: true, strict: true }).slice(0, 80)}`;
+
     const imageUrl = await fetchOgImage(it.link);
 
     const fm = {
@@ -312,19 +302,18 @@ async function main() {
       imageUrl: imageUrl || "",
       imageCredit: imageUrl ? `Image de l’article — ${it.link}` : "",
     };
-
     const body =
       (imageUrl ? `![${it.title}](${imageUrl})\n\n` : "") +
       `## Résumé\n\n${fm.summary}\n\n## Lien\n\n${it.link}\n`;
 
-    const fileName = `${base}.md`;
     for (const dir of OUT_DIRS) {
-      fs.writeFileSync(path.join(dir, fileName), `---\n${yaml(fm)}---\n\n${body}`, "utf-8");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${base}.md`), `---\n${yaml(fm)}---\n\n${body}`, "utf-8");
     }
     created++;
   }
 
-  console.log(`✅ CleaReconDL v1.5: ${created} fichier(s) ajouté(s) sur ${filtered.length} pertinents (bruts: ${raw.length}, uniques avant filtre: ${uniq.length}).`);
+  console.log(`✅ CleaReconDL v1.6: ${created} créé(s) — pertinents: ${filtered.length} — bruts: ${raw.length} — uniq après redirection: ${uniq.length}`);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch(e => { console.error(e); process.exit(1); });
