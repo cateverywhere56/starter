@@ -27,14 +27,28 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Install deps
         run: npm install
 
-      - name: Generate news item(s)
+      # 👉 Génération des contenus (colonne principale + colonne gauche)
+      - name: Generate news (papers)
         run: npm run generate
+
+      - name: Generate CleaReconDL (left column)
+        run: npm run generate:clearecondl
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Optionnel si tu utilises RSSHub/chaînes YouTube :
+          RSSHUB_BASE: ${{ vars.RSSHUB_BASE }}                # ex: https://rsshub.example.com
+          LINKEDIN_COMPANY_IDS: ${{ vars.LINKEDIN_COMPANY_IDS }}  # ex: "1337,2414183"
+          YT_CHANNEL_IDS: ${{ vars.YT_CHANNEL_IDS }}              # ex: "UCxxxx,UCyyyy"
+
+      # (Optionnel) petit diagnostic pour vérifier que des fichiers ont bien été générés
+      - name: Debug counts
+        run: |
+          echo "papers:" $(ls -1 src/content/papers 2>/dev/null | wc -l || true)
+          echo "clearecondl:" $(ls -1 src/content/clearecondl 2>/dev/null | wc -l || true)
 
       - name: Commit generated content back to repo
         run: |
