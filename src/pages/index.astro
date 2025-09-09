@@ -1,27 +1,24 @@
 ---
 /**
- * Page d’accueil : actus (colonne principale) + CleaReconDL (colonne gauche).
- * - Import des contenus Markdown générés par les scripts.
- * - Colonne gauche = tout l'historique, avec dédoublonnage par URL finale.
+ * Page d’accueil : gauche(CleaReconDL) — centre(actus) — droite(GEHC 2025).
  */
 
-// 👉 Chemins RELATIFS depuis src/pages vers src/content
+// Principal (actus)
 const modules = import.meta.glob('../content/papers/*.md', { eager: true });
 
-// 👉 importe des DEUX chemins possibles (casse différente) pour la colonne gauche
+// Colonne gauche : CleaReconDL (deux dossiers possibles, casse différente)
 const clRaw = {
   ...import.meta.glob('../content/clearecondl/*.md', { eager: true }),
   ...import.meta.glob('../content/cleareconDL/*.md', { eager: true }),
 };
 
-/* --------- Helpers --------- */
+// Colonne droite : GE HealthCare 2025 (généré par generate-gehealthcare-2025.js)
+const gehcRaw = import.meta.glob('../content/gehc2025/*.md', { eager: true });
+
+/* Helpers */
 function normalizeUrl(u: string) {
-  try {
-    const x = new URL(u);
-    return (x.origin + x.pathname).replace(/\/+$/, '').toLowerCase();
-  } catch {
-    return (u || '').toLowerCase();
-  }
+  try { const x = new URL(u); return (x.origin + x.pathname).replace(/\/+$/, '').toLowerCase(); }
+  catch { return (u || '').toLowerCase(); }
 }
 function hostOf(url: string) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
@@ -51,42 +48,54 @@ function truncate(s: string, n = 160) {
   return x.length > n ? x.slice(0, n - 1) + '…' : x;
 }
 
-/* --------- Données --------- */
+/* Données */
 const posts = Object.values(modules)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-// Colonne gauche : fusion des deux dossiers + tri + DÉDOUBLONNAGE par sourceUrl normalisée
-const leftPostsAll = Object.values(clRaw)
+// gauche (dédoublonnage par URL)
+const leftAll = Object.values(clRaw)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
 const seenLeft = new Set<string>();
-const leftPosts = leftPostsAll.filter((p: any) => {
+const leftPosts = leftAll.filter((p: any) => {
   const key = normalizeUrl(p.sourceUrl);
   if (seenLeft.has(key)) return false;
   seenLeft.add(key);
   return true;
 });
+
+// droite (GEHC 2025) — déjà filtré par l’année dans le générateur
+const gehcAll = Object.values(gehcRaw)
+  .map((m) => (m as any).frontmatter)
+  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
+  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 ---
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
     <title>Actualités — France</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      @media (max-width: 1100px) {
+        .layout { grid-template-columns: 1fr; }
+        .aside-left, .aside-right { position: static !important; }
+      }
+    </style>
   </head>
   <body style="background:#D9D9D9; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; min-height:100vh;">
-    <div style="max-width: 1180px; margin: 0 auto; padding: 24px;">
+    <div style="max-width: 1300px; margin: 0 auto; padding: 24px;">
       <header>
         <h1 style="margin:0 0 8px 0;">Actualités — France</h1>
         <p style="opacity:.7;margin:0;">Une info du jour, en français.</p>
       </header>
 
-      <div style="display:grid; grid-template-columns: 320px 1fr; gap: 20px; align-items:start; margin-top:24px;">
+      <div class="layout" style="display:grid; grid-template-columns: 320px 1fr 360px; gap: 20px; align-items:start; margin-top:24px;">
         <!-- Colonne gauche : CleaReconDL -->
-        <aside style="position:sticky; top:16px; align-self:start;">
+        <aside class="aside-left" style="position:sticky; top:16px; align-self:start;">
           <section style="background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04);">
             <h2 style="margin:0 0 6px 0; font-size:18px;">En ce moment : <span style="white-space:nowrap;">CleaRecon&nbsp;DL</span></h2>
             <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{leftPosts.length} élément(s)</div>
@@ -120,7 +129,7 @@ const leftPosts = leftPostsAll.filter((p: any) => {
                             />
                           ) : (
                             <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6; display:flex; align-items:center; justify-content:center; font-size:12px; color:#777;">
-                              {faviconOf(p.sourceUrl) ? <img src={faviconOf(p.sourceUrl)} alt="" width="20" height="20" /> : '—'}
+                              {hostOf(p.sourceUrl)}
                             </div>
                           )}
                           <div style="min-width:0;">
@@ -193,6 +202,62 @@ const leftPosts = leftPostsAll.filter((p: any) => {
               </main>
             )
         }
+
+        <!-- Colonne droite : GE HealthCare (2025) -->
+        <aside class="aside-right" style="position:sticky; top:16px; align-self:start;">
+          <section style="background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04);">
+            <h2 style="margin:0 0 6px 0; font-size:18px;">GE HealthCare — vidéos 2025</h2>
+            <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{gehcAll.length} vidéo(s)</div>
+
+            {
+              gehcAll.length === 0
+                ? (
+                  <p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">
+                    Lance <code>npm run generate:gehc2025</code> pour indexer les vidéos 2025.
+                  </p>
+                )
+                : (
+                  <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow:auto;">
+                    {gehcAll.map((v: any) => (
+                      <li>
+                        <a
+                          href={v.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style="display:flex; gap:10px; text-decoration:none; color:inherit; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px;"
+                          aria-label={`Ouvrir la vidéo : ${v.title}`}
+                        >
+                          {v.imageUrl ? (
+                            <img
+                              src={v.imageUrl}
+                              alt=""
+                              loading="lazy"
+                              width="96"
+                              height="54"
+                              style="flex:0 0 96px; width:96px; height:54px; object-fit:cover; border-radius:6px; background:#f6f6f6;"
+                            />
+                          ) : (
+                            <div style="flex:0 0 96px; width:96px; height:54px; border-radius:6px; background:#f6f6f6;"></div>
+                          )}
+                          <div style="min-width:0;">
+                            <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">
+                              {v.title}
+                            </div>
+                            <div style="opacity:.75; font-size:12px; margin-bottom:4px;">
+                              {new Date(v.date).toLocaleDateString('fr-FR')} · YouTube
+                            </div>
+                            <div style="font-size:13px; opacity:.9;">
+                              {truncate(v.summary, 140)}
+                            </div>
+                          </div>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )
+            }
+          </section>
+        </aside>
       </div>
 
       <footer style="opacity:.6; font-size:12px; margin-top:32px;">
