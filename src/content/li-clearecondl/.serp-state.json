@@ -1,5 +1,5 @@
 {
-  "source": "yahoo-html",
+  "source": "fallback",
   "bing": {
     "\"#cleareconDL\"": 0,
     "\"CleaRecon DL\"": 0,
@@ -21,6 +21,6 @@
     "\"CleaReconDL\"": 4
   },
   "fallback": {
-    "step": 3
+    "step": 4
   }
 }
