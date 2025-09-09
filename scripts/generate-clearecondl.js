@@ -1,10 +1,9 @@
 // scripts/generate-clearecondl.js
-// v2.0 — Tout en dur (pas d'ENV)
-// - Cible mots-clés CleaRecon DL
-// - Ajoute personnes LinkedIn (posts uniquement)
-// - Force la chaîne YouTube GE HealthCare (@gehealthcare -> channel_id, + fallback user=gehealthcare)
-// - Permet une liste blanche de posts LinkedIn (seeds)
-// - Suit redirections, dédup, OG image/titre, backfill complet
+// v2.1 — Auto-discovery (pas de seeds) : LinkedIn posts par personnes + YouTube @gehealthcare
+// - LinkedIn: Bing Web RSS (site:linkedin.com/posts/ + site:linkedin.com/feed/update) par NOM
+//             + fallback: découverte profil (/in/…) -> scrape recent-activity/posts/ via r.jina.ai -> collecte /posts/…
+// - YouTube: handle @gehealthcare -> channel_id -> flux officiel + fallback user=gehealthcare
+// - Redirections suivies, dédup, OG meta, backfill complet
 
 import fs from "node:fs";
 import path from "node:path";
@@ -12,7 +11,7 @@ import fetch from "node-fetch";
 import { parseStringPromise } from "xml2js";
 import slugify from "slugify";
 
-/* -------- Config "en dur" -------- */
+/* -------- Config -------- */
 const OUT_DIRS = [
   path.join("src", "content", "clearecondl"),
   path.join("src", "content", "cleareconDL"),
@@ -20,16 +19,11 @@ const OUT_DIRS = [
 
 // Mots-clés généraux
 const KEY_QUERIES = [
-  `"CleaRecon DL"`,
-  `"CleareconDL"`,
-  `#clearecondl`,
-  `"CleaRecon"`,
-  `"Clearecon"`,
-  `"Clear Recon DL"`,
-  `"ClearEcon DL"`,
+  `"CleaRecon DL"`, `"CleareconDL"`, `#clearecondl`,
+  `"CleaRecon"`, `"Clearecon"`, `"Clear Recon DL"`, `"ClearEcon DL"`,
 ];
 
-// Comptes/personnes LinkedIn (on cherche leurs posts)
+// Personnes LinkedIn à suivre (on trouve leurs posts automatiquement)
 const LINKEDIN_PEOPLE = [
   "Charles Nutting",
   "Philip Rackliff",
@@ -40,47 +34,30 @@ const LINKEDIN_PEOPLE = [
   "Ioanne Cartier",
 ];
 
-// Chaînes YouTube à intégrer
-const YT_HANDLES = ["@gehealthcare"];     // résolu en channel_id automatiquement
-const YT_USERS   = ["gehealthcare"];       // fallback user=...
-const YT_CHANNEL_IDS = [];                 // tu peux ajouter des UCxxxxxxxx si besoin
+// YouTube GE HealthCare (handle + fallback user)
+const YT_HANDLES = ["@gehealthcare"];
+const YT_USERS   = ["gehealthcare"]; // fallback
+const YT_CHANNEL_IDS = [];           // ajoute d'éventuels UC… si besoin
 
-// Liste blanche de posts LinkedIn (seeds) — ils seront ajoutés même si non trouvés par la recherche
-const LINKEDIN_SEED_URLS = [
-  "https://www.linkedin.com/posts/charles-nutting-do-fsir-5b18b95a_cone-beam-with-clearecon-dl-helps-delineate-activity-7369113421126041602-_Rpx",
-];
-
-// (optionnel) RSSHub d'entreprise LinkedIn (désactivé ici)
-// const RSSHUB_BASE = "https://rsshub.example.com";
-// const LINKEDIN_COMPANY_IDS = ["1337","2414183"];
-
-// Limite d’écriture (Infinity = pas de limite)
+// Pas de limite d’écriture
 const MAX_ITEMS = Infinity;
 
 /* -------- Feeds -------- */
+// Bing Web (RSS) — utile pour LinkedIn (posts + profils)
+const BING_WEB_RSS = (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&format=rss`;
+
+// Google News / Bing News / YouTube Search / Reddit (compléments)
 const SEARCH_FEEDS = [
   { name: "Google News (web)",      url: "https://news.google.com/rss/search?q={q}&hl=fr&gl=FR&ceid=FR:fr" },
   { name: "Bing News (web)",        url: "https://www.bing.com/news/search?q={q}&format=RSS" },
-  { name: "Google News (LinkedIn)", url: "https://news.google.com/rss/search?q={q}+site%3Alinkedin.com&hl=fr&gl=FR&ceid=FR:fr" },
-  { name: "Bing News (LinkedIn)",   url: "https://www.bing.com/news/search?q={q}+site%3Alinkedin.com&format=RSS" },
   { name: "YouTube Search",         url: "https://www.youtube.com/feeds/videos.xml?search_query={q}" },
   { name: "Reddit",                 url: "https://www.reddit.com/search.rss?q={q}" },
-];
-
-const LI_PERSON_FEEDS_NARROW = [
-  { name: "Google News (LI person+narrow)", url: "https://news.google.com/rss/search?q={q}+%22{person}%22+site%3Alinkedin.com&hl=fr&gl=FR&ceid=FR:fr" },
-  { name: "Bing News (LI person+narrow)",   url: "https://www.bing.com/news/search?q={q}+%22{person}%22+site%3Alinkedin.com&format=RSS" },
-];
-
-const LI_PERSON_FEEDS_WIDE = [
-  { name: "Google News (LI person+wide)", url: "https://news.google.com/rss/search?q=%22{person}%22+site%3Alinkedin.com&hl=fr&gl=FR&ceid=FR:fr" },
-  { name: "Bing News (LI person+wide)",   url: "https://www.bing.com/news/search?q=%22{person}%22+site%3Alinkedin.com&format=RSS" },
 ];
 
 /* -------- Utils -------- */
 const REQUEST_TIMEOUT_MS = 12000;
 const MAX_RETRIES = 2;
-const USER_AGENT = "clearecondl/2.0 (+https://github.com/)";
+const USER_AGENT = "clearecondl/2.1 (+https://github.com/)";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function timedFetch(url, opts = {}, retries = MAX_RETRIES) {
@@ -199,6 +176,18 @@ function classifyLinkedIn(u) {
     return "other";
   } catch { return "none"; }
 }
+function isRelevant(it) {
+  const host = hostOf(it.link);
+  const text = `${it.title || ""} ${it.summary || ""} ${it.link || ""}`;
+
+  if (host.endsWith("linkedin.com")) {
+    const cls = classifyLinkedIn(it.link);
+    if (!(cls === "post" || cls === "profile-posts")) return false;
+    return anyKeyMatch(text) || anyPersonMatch(text) || true; // posts découverts automatiquement => OK
+  }
+  if (host.includes("youtube.com") || host === "youtu.be") return true;
+  return anyKeyMatch(text);
+}
 
 /* -------- YouTube handle -> channel_id -------- */
 async function resolveYouTubeChannelIdFromHandle(handle) {
@@ -221,6 +210,74 @@ async function resolveYouTubeChannelIdFromHandle(handle) {
   return null;
 }
 
+/* -------- LinkedIn discovery helpers -------- */
+// 1) Cherche des POSTS LinkedIn via Bing Web RSS
+async function searchLinkedInPostsByName(name) {
+  const queries = [
+    `site:linkedin.com/posts/ "${name}"`,
+    `site:linkedin.com/feed/update "${name}"`,
+  ];
+  const items = [];
+  for (const q of queries) {
+    try {
+      const arr = await fetchFeed(BING_WEB_RSS(q));
+      for (const e of arr) items.push(toItem(e, `Bing Web (LI post) — ${name}`));
+    } catch (err) {
+      console.error("Bing Web (LI post) error:", name, q, String(err).slice(0,160));
+    }
+  }
+  return items;
+}
+
+// 2) Si rien, trouve un profil /in/ et tente de scraper recent-activity/posts/
+async function findLinkedInProfilesByName(name, max = 2) {
+  const q = `site:linkedin.com/in/ "${name}"`;
+  try {
+    const arr = await fetchFeed(BING_WEB_RSS(q));
+    const links = [];
+    for (const e of arr) {
+      const it = toItem(e, `Bing Web (LI profile) — ${name}`);
+      if (it.link && /linkedin\.com\/in\//i.test(it.link)) links.push(it.link);
+      if (links.length >= max) break;
+    }
+    return links;
+  } catch (err) {
+    console.error("Bing Web (LI profile) error:", name, String(err).slice(0,160));
+    return [];
+  }
+}
+
+async function scrapeRecentPostsFromProfile(profileUrl, maxLinks = 10) {
+  // r.jina.ai renvoie une version textuelle du HTML -> on peut y retrouver des URLs /posts/…
+  const proxied = `https://r.jina.ai/http://${profileUrl.replace(/^https?:\/\//,"")}/recent-activity/posts/`;
+  try {
+    const res = await timedFetch(proxied, { headers: { Accept: "text/plain" } });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const text = await res.text();
+    const links = Array.from(text.matchAll(/https:\/\/www\.linkedin\.com\/posts\/[^\s")]+/g)).map(m => m[0]);
+    // dédup + coupe
+    const seen = new Set(); const out = [];
+    for (const u of links) {
+      const key = normalizeUrl(u);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(u);
+      if (out.length >= maxLinks) break;
+    }
+    // map en items "simples" (on enrichira via OG meta à l’écriture)
+    return out.map(link => ({
+      title: "Post LinkedIn",
+      summary: "",
+      link,
+      dateISO: new Date().toISOString(),
+      source: "LinkedIn Profile recent-activity",
+    }));
+  } catch (err) {
+    console.error("scrape recent-activity error:", profileUrl, String(err).slice(0,160));
+    return [];
+  }
+}
+
 /* -------- FS -------- */
 function ensureDirs() { for (const d of OUT_DIRS) fs.mkdirSync(d, { recursive: true }); }
 function readExisting() {
@@ -240,72 +297,44 @@ function readExisting() {
 /* -------- MAIN -------- */
 async function main() {
   ensureDirs();
-  console.log(`[clearecondl] People: ${LINKEDIN_PEOPLE.length} -> ${LINKEDIN_PEOPLE.join(", ")}`);
+  console.log(`[clearecondl] People: ${LINKEDIN_PEOPLE.join(", ")}`);
   console.log(`[clearecondl] YT: handles=${YT_HANDLES.join(", ")||"(none)"} users=${YT_USERS.join(", ")||"(none)"} channels=${YT_CHANNEL_IDS.join(", ")||"(none)"}`);
-  if (LINKEDIN_SEED_URLS.length) console.log(`[clearecondl] LinkedIn seeds: ${LINKEDIN_SEED_URLS.length}`);
 
   const raw = [];
   const stats = new Map(); const bump = (k,n=1)=>stats.set(k,(stats.get(k)||0)+n);
 
-  /* 0) Seeds LinkedIn (posts explicites fournis) */
-  for (const seed of LINKEDIN_SEED_URLS) {
-    let final = seed;
-    if (needsResolve(seed, "LinkedIn seed")) final = await resolveFinalUrl(seed);
-    const meta = await fetchOgMeta(final);
-    const title = meta.title || "Post LinkedIn";
-    const summary = meta.desc || title;
-    raw.push({ title, summary, link: final, dateISO: new Date().toISOString(), source: "LinkedIn Seed" });
-    bump("LinkedIn Seed");
-  }
-
-  /* 1) Recherche générale (mots-clés) */
+  /* 0) Recherche générale (YouTube Search / News / Reddit) */
   for (const q of KEY_QUERIES) {
     for (const feed of SEARCH_FEEDS) {
       const url = feed.url.replace("{q}", encodeURIComponent(q));
       try {
         const entries = await fetchFeed(url);
         bump(feed.name, entries.length);
-        for (const e of entries) {
-          const it = toItem(e, feed.name);
-          if (it.title && it.link) raw.push(it);
-        }
+        for (const e of entries) raw.push(toItem(e, feed.name));
       } catch (err) {
         console.error("Feed error:", feed.name, url, String(err).slice(0, 160));
       }
     }
   }
 
-  /* 2) LinkedIn par personne : narrow (nom + mots-clés) */
+  /* 1) LinkedIn — posts par personne (Bing Web RSS) */
   for (const person of LINKEDIN_PEOPLE) {
-    for (const q of KEY_QUERIES) {
-      for (const feed of LI_PERSON_FEEDS_NARROW) {
-        const url = feed.url.replace("{q}", encodeURIComponent(q)).replace("{person}", encodeURIComponent(person));
-        try {
-          const entries = await fetchFeed(url);
-          bump(`${feed.name}`, entries.length);
-          for (const e of entries) raw.push(toItem(e, `${feed.name} — ${person}`));
-        } catch (err) {
-          console.error("LI person narrow error:", person, feed.name, String(err).slice(0, 160));
-        }
+    const hits = await searchLinkedInPostsByName(person);
+    bump(`LI posts (search) — ${person}`, hits.length);
+    hits.forEach(it => raw.push(it));
+
+    // fallback si rien trouvé : profil -> scrape recent-activity/posts/
+    if (hits.length === 0) {
+      const profiles = await findLinkedInProfilesByName(person, 2);
+      for (const purl of profiles) {
+        const posts = await scrapeRecentPostsFromProfile(purl, 8);
+        bump(`LI posts (scrape) — ${person}`, posts.length);
+        posts.forEach(it => raw.push(it));
       }
     }
   }
 
-  /* 3) LinkedIn par personne : wide (nom seul) */
-  for (const person of LINKEDIN_PEOPLE) {
-    for (const feed of LI_PERSON_FEEDS_WIDE) {
-      const url = feed.url.replace("{person}", encodeURIComponent(person));
-      try {
-        const entries = await fetchFeed(url);
-        bump(`${feed.name}`, entries.length);
-        for (const e of entries) raw.push(toItem(e, `${feed.name} — ${person}`));
-      } catch (err) {
-        console.error("LI person wide error:", person, feed.name, String(err).slice(0, 160));
-      }
-    }
-  }
-
-  /* 4) YouTube: recherche (déjà via SEARCH_FEEDS) + users + channel_ids + handles -> channel_id */
+  /* 2) YouTube: users + channel_ids + handles -> channel_id */
   for (const user of YT_USERS) {
     const url = `https://www.youtube.com/feeds/videos.xml?user=${encodeURIComponent(user)}`;
     try {
@@ -339,12 +368,9 @@ async function main() {
     }
   }
 
-  // (désactivé) RSSHub entreprises
-  // if (RSSHUB_BASE && LINKEDIN_COMPANY_IDS.length) { ... }
-
   console.log("[clearecondl] Raw counts by source:", Object.fromEntries([...stats.entries()].sort()));
 
-  /* 5) Dé-dup brut */
+  /* 3) Dé-dup brut */
   const prelim = [];
   const seen1 = new Set();
   for (const it of raw) {
@@ -354,7 +380,7 @@ async function main() {
     prelim.push(it);
   }
 
-  /* 6) Résolution URL finale + re-dédoublonnage */
+  /* 4) Résolution URL finale + re-dédoublonnage */
   const resolved = [];
   for (const it of prelim) {
     const finalLink = needsResolve(it.link, it.source) ? await resolveFinalUrl(it.link) : it.link;
@@ -369,7 +395,7 @@ async function main() {
     uniq.push(it);
   }
 
-  /* 7) Filtrage final */
+  /* 5) Filtrage final (posts LinkedIn / YouTube OK / autres = mots-clés) */
   const filtered = uniq.filter((it) => {
     const host = hostOf(it.link);
     const text = `${it.title || ""} ${it.summary || ""} ${it.link || ""}`;
@@ -377,19 +403,20 @@ async function main() {
     if (host.endsWith("linkedin.com")) {
       const cls = classifyLinkedIn(it.link);
       if (!(cls === "post" || cls === "profile-posts")) return false;
-      // garder si mot-clé OU personne ciblée OU seed explicitement ajouté
+      // accepter : mots-clés OU nom de personne (les posts découverts automatiquement passent)
       if (anyKeyMatch(text) || anyPersonMatch(text)) return true;
-      if (/LinkedIn Seed/.test(it.source)) return true;
+      // si c'est venu du scrape recent-activity, on garde
+      if (/LinkedIn Profile recent-activity/.test(it.source)) return true;
       return false;
     }
-    if (host.includes("youtube.com") || host === "youtu.be") return true; // on garde recherche & chaînes
+    if (host.includes("youtube.com") || host === "youtu.be") return true;
     return anyKeyMatch(text);
   });
 
-  /* 8) Tri chrono desc */
+  /* 6) Tri chrono desc */
   filtered.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
 
-  /* 9) Écriture */
+  /* 7) Écriture */
   const already = readExisting();
   let created = 0;
   for (const it of filtered) {
@@ -427,7 +454,7 @@ async function main() {
     created++;
   }
 
-  console.log(`✅ CleaReconDL v2.0: ${created} créé(s) — pertinents: ${filtered.length} — bruts: ${raw.length} — uniq après redirection: ${uniq.length}`);
+  console.log(`✅ CleaReconDL v2.1: ${created} créé(s) — pertinents: ${filtered.length} — bruts: ${raw.length} — uniq après redirection: ${uniq.length}`);
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
