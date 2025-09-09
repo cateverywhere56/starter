@@ -10,7 +10,8 @@
     "generate": "node scripts/generate-paper.js",
     "generate:clearecondl": "node scripts/generate-clearecondl.js",
     "generate:gehc2025": "node scripts/generate-gehealthcare-2025.js",
-    "generate:all": "npm run generate && npm run generate:clearecondl && npm run generate:gehc2025"
+    "generate:all": "npm run generate && npm run generate:clearecondl && npm run generate:gehc2025",
+    "generate:li-clearecondl": "node scripts/generate-linkedin-clearecondl.js"
   },
   "dependencies": {
     "astro": "^4.10.0",
