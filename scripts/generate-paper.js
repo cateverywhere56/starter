@@ -42,12 +42,7 @@ const FEEDS = [
   /* Études cliniques (personnaliser l’URL) */
   // Exemple générique à remplacer par l’URL RSS de TA recherche (cf. doc ClinicalTrials.gov)
   { name: "ClinicalTrials.gov — ta recherche", url: "https://clinicaltrials.gov/ct2/results/rss.xml?term=interventional%20radiology&recrs=&cntry=&state=&city=&dist=" },
-
-  /* Régulation internationale */
-  { name: "IMDRF — News",          url: "https://www.imdrf.org/news-events/news.xml" },
-  { name: "IMDRF — Documents",     url: "https://www.imdrf.org/documents.xml" },
-  { name: "IMDRF — Consultations", url: "https://www.imdrf.org/consultations.xml" },
-
+   
   /* Acteurs industriels (ex. Medtronic) — flux officiels par portefeuille */
   { name: "Medtronic — Press releases (All)",    url: "https://news.medtronic.com/rss?rsspage=20295" },
   { name: "Medtronic — Cardiovascular",          url: "https://news.medtronic.com/rss?rsspage=20299" },
