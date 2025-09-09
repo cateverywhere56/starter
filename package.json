@@ -15,6 +15,9 @@
     "generate:all": "npm run generate && npm run generate:clearecondl",
     "build": "astro build"
   },
+  "scripts": {
+    "generate:gehc2025": "node scripts/generate-gehealthcare-2025.js"
+  },
   "dependencies": {
     "astro": "^4.10.0",
     "gray-matter": "^4.0.3",
