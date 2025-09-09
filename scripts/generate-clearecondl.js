@@ -1,0 +1,245 @@
+// scripts/generate-clearecondl.js
+// Colonne “CleaRecon DL / CleareconDL / #clearecondl”
+// Sources : Google News (web + LinkedIn via site:), YouTube Search, (optionnel) LinkedIn via RSSHub company posts.
+
+import fs from "node:fs";
+import path from "node:path";
+import fetch from "node-fetch";
+import { parseStringPromise } from "xml2js";
+import slugify from "slugify";
+
+/* ---- CONFIG ---- */
+const OUT_DIR = path.join("src", "content", "clearecondl");
+const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_RETRIES = 2;
+const USER_AGENT = "clearecondl/1.2 (+https://github.com/)";
+
+// Mots/hashtags (insensibles à la casse côté moteurs)
+const QUERIES = [
+  `"CleaRecon DL"`,
+  `"CleareconDL"`,
+  `#clearecondl`
+];
+
+// (Optionnel) YouTube : tu peux pinner des chaînes en plus de la recherche
+const YT_CHANNEL_IDS = (process.env.YT_CHANNEL_IDS || "") // "UCxxxx,UCyyyy"
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+// (Optionnel) LinkedIn via RSSHub (self-hosté conseillé).
+// Ex.: export RSSHUB_BASE="https://rsshub.example.com"
+//      export LINKEDIN_COMPANY_IDS="1337,2414183"
+const RSSHUB_BASE = (process.env.RSSHUB_BASE || "").replace(/\/+$/, "");
+const LINKEDIN_COMPANY_IDS = (process.env.LINKEDIN_COMPANY_IDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+/* ---- SEARCH FEEDS ----
+   {q} sera remplacé par encodeURIComponent(query)
+*/
+const SEARCH_FEEDS = [
+  // Web (actu) : Google News RSS
+  { name: "Google News (web)", url: "https://news.google.com/rss/search?q={q}&hl=fr&gl=FR&ceid=FR:fr" },
+  // LinkedIn via Google News (filtre domaine)
+  { name: "Google News (LinkedIn)", url: "https://news.google.com/rss/search?q={q}+site%3Alinkedin.com&hl=fr&gl=FR&ceid=FR:fr" },
+  // YouTube : recherche (flux officiel)
+  { name: "YouTube Search", url: "https://www.youtube.com/feeds/videos.xml?search_query={q}" },
+  // Reddit (utile si la thématique remonte là-bas)
+  { name: "Reddit", url: "https://www.reddit.com/search.rss?q={q}" },
+];
+
+/* ---- utils ---- */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function timedFetch(url, opts = {}, retries = MAX_RETRIES) {
+  for (let attempt = 0; ; attempt++) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, {
+        ...opts,
+        headers: { "User-Agent": USER_AGENT, ...(opts.headers || {}) },
+        signal: ctrl.signal,
+      });
+      clearTimeout(t);
+      return res;
+    } catch (err) {
+      clearTimeout(t);
+      if (attempt >= retries) throw err;
+      await sleep(400 * (attempt + 1));
+    }
+  }
+}
+function cleanText(s = "") {
+  return String(s).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+function normalizeUrl(u) {
+  try {
+    const x = new URL(u);
+    return (x.origin + x.pathname).replace(/\/+$/, "").toLowerCase();
+  } catch { return String(u).toLowerCase(); }
+}
+function yaml(frontmatter) {
+  const esc = (v) => String(v).replace(/"/g, '\\"');
+  return Object.entries(frontmatter)
+    .map(([k, v]) => Array.isArray(v)
+      ? `${k}: [${v.map((x) => `"${esc(x)}"`).join(", ")}]`
+      : `${k}: "${esc(v)}"`).join("\n") + "\n";
+}
+
+// RSS → items
+async function fetchFeed(url) {
+  const res = await timedFetch(url);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const xml = await res.text();
+  const parsed = await parseStringPromise(xml, { explicitArray: false });
+  const channel = parsed?.rss?.channel || parsed?.feed;
+  const raw = channel?.item || channel?.entry || [];
+  const arr = Array.isArray(raw) ? raw : [raw].filter(Boolean);
+  return arr;
+}
+function toItem(e, sourceName) {
+  const title = cleanText(e.title?.["#text"] || e.title);
+  const link =
+    typeof e.link === "string"
+      ? e.link
+      : e.link?.href || (Array.isArray(e.link) ? e.link.find((x) => x?.href)?.href || e.link[0] : null);
+  const pageUrl = link || e.id || "";
+  const summary = cleanText(e.description || e.summary || e.content?.["#text"] || e.content);
+  const dateISO = (() => {
+    const cand = e.pubDate || e.published || e.updated || e["dc:date"];
+    const t = Date.parse(cand);
+    return Number.isNaN(t) ? new Date().toISOString() : new Date(t).toISOString();
+  })();
+  return { title, summary, link: pageUrl, dateISO, source: sourceName };
+}
+
+// og:image (simple)
+async function fetchOgImage(articleUrl) {
+  try {
+    const res = await timedFetch(articleUrl, { headers: { Accept: "text/html" } });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const pick = (re) => html.match(re)?.[1];
+    const og = pick(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+    const tw = pick(/<meta[^>]+name=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/i);
+    const candidates = [og, tw]
+      .filter(Boolean)
+      .map((u) => { try { return new URL(u, articleUrl).href; } catch { return null; } })
+      .filter(Boolean);
+    return candidates[0] || null;
+  } catch { return null; }
+}
+
+async function main() {
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+
+  // Anti-doublon : liens déjà générés
+  const seen = new Set();
+  for (const f of fs.readdirSync(OUT_DIR)) {
+    if (!f.endsWith(".md")) continue;
+    const txt = fs.readFileSync(path.join(OUT_DIR, f), "utf-8");
+    const m = txt.match(/sourceUrl:\s*"([^"]+)"/);
+    if (m) seen.add(normalizeUrl(m[1]));
+  }
+
+  const all = [];
+
+  // 1) Google News / YouTube Search / Reddit
+  for (const q of QUERIES) {
+    for (const feed of SEARCH_FEEDS) {
+      const url = feed.url.replace("{q}", encodeURIComponent(q));
+      try {
+        const entries = await fetchFeed(url);
+        for (const e of entries) {
+          const it = toItem(e, feed.name);
+          if (it.title && it.link) all.push(it);
+        }
+      } catch (err) {
+        console.error("Feed error:", feed.name, url, String(err).slice(0, 160));
+      }
+    }
+  }
+
+  // 2) (Optionnel) YouTube : chaînes spécifiques
+  for (const ch of YT_CHANNEL_IDS) {
+    const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(ch)}`;
+    try {
+      const entries = await fetchFeed(url);
+      for (const e of entries) {
+        const it = toItem(e, "YouTube Channel");
+        if (it.title && it.link) all.push(it);
+      }
+    } catch (err) {
+      console.error("YouTube channel feed error:", ch, String(err).slice(0, 160));
+    }
+  }
+
+  // 3) (Optionnel) LinkedIn via RSSHub — posts de pages entreprise
+  if (RSSHUB_BASE && LINKEDIN_COMPANY_IDS.length) {
+    for (const id of LINKEDIN_COMPANY_IDS) {
+      const url = `${RSSHUB_BASE}/linkedin/company/${encodeURIComponent(id)}/posts`;
+      try {
+        const entries = await fetchFeed(url);
+        for (const e of entries) {
+          const it = toItem(e, "LinkedIn (RSSHub)");
+          if (it.title && it.link) all.push(it);
+        }
+      } catch (err) {
+        console.error("RSSHub LinkedIn error:", id, String(err).slice(0, 160));
+      }
+    }
+  }
+
+  // Dé-dup (par lien normalisé) + tri chrono
+  const uniq = [];
+  const seenLinks = new Set();
+  for (const it of all) {
+    const key = normalizeUrl(it.link);
+    if (seenLinks.has(key)) continue;
+    seenLinks.add(key);
+    uniq.push(it);
+  }
+  uniq.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
+
+  // Écriture des fichiers
+  let created = 0;
+  for (const it of uniq) {
+    const key = normalizeUrl(it.link);
+    if (seen.has(key)) continue;
+
+    const d = new Date(it.dateISO);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    const niceDate = `${yyyy}-${mm}-${dd}`;
+    const base = `${niceDate}-${slugify(it.title, { lower: true, strict: true }).slice(0, 80)}`;
+    const file = path.join(OUT_DIR, `${base}.md`);
+
+    const imageUrl = await fetchOgImage(it.link);
+
+    const fm = {
+      title: it.title,
+      date: d.toISOString(),
+      publishedDate: d.toLocaleDateString("fr-FR", { year: "numeric", month: "long", day: "numeric" }),
+      summary: it.summary || it.title,
+      sourceUrl: it.link,
+      permalink: `/clearecondl/${base}`,
+      tags: ["CleareconDL", it.source],
+      imageUrl: imageUrl || "",
+      imageCredit: imageUrl ? `Image de l’article — ${it.link}` : "",
+    };
+
+    const body =
+      (imageUrl ? `![${it.title}](${imageUrl})\n\n` : "") +
+      `## Résumé\n\n${fm.summary}\n\n## Lien\n\n${it.link}\n`;
+
+    fs.writeFileSync(file, `---\n${yaml(fm)}---\n\n${body}`, "utf-8");
+    created++;
+  }
+
+  console.log(`✅ CleaReconDL: ${created} fichier(s) ajouté(s).`);
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });
