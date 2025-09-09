@@ -9,6 +9,12 @@
     "preview": "astro preview",
     "generate": "node scripts/generate-paper.js"
   },
+  "scripts": {
+    "generate": "node scripts/generate-paper.js",
+    "generate:clearecondl": "node scripts/generate-clearecondl.js",
+    "generate:all": "npm run generate && npm run generate:clearecondl",
+    "build": "astro build"
+  },
   "dependencies": {
     "astro": "^4.10.0",
     "gray-matter": "^4.0.3",
