@@ -1,0 +1,14 @@
+# — Node / Astro classiques —
+node_modules/
+dist/
+.cache/
+.env*
+*.local
+.DS_Store
+
+# — Assure-toi que le contenu généré et l'état SERP sont gardés —
+!src/
+!src/content/
+!src/content/**/
+!src/content/**/*.md
+!src/content/li-clearecondl/.serp-state.json
