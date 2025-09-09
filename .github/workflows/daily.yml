@@ -47,16 +47,26 @@ jobs:
         #   LINKEDIN_COMPANY_IDS: ${{ vars.LINKEDIN_COMPANY_IDS }}# ex: "1337,2414183"
         #   YT_CHANNEL_IDS: ${{ vars.YT_CHANNEL_IDS }}            # ex: "UCxxxx,UCyyyy"
 
-      # (Optionnel) Diagnostic : vérifie que des fichiers ont été générés
+      # 👉 Nouvelle étape : vidéos GE HealthCare 2025 (colonne droite)
+      - name: Generate GE HealthCare videos (2025)
+        run: npm run generate:gehc2025
+        env:
+          # Facultatif : pour être exhaustif sur toute l'année 2025
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
+
+      # 🔎 Diagnostic : vérifie que des fichiers ont bien été générés
       - name: Debug counts
         run: |
           echo "papers:        " $(ls -1 src/content/papers 2>/dev/null | wc -l || true)
           echo "clearecondl:   " $(ls -1 src/content/clearecondl 2>/dev/null | wc -l || true)
           echo "cleareconDL:   " $(ls -1 src/content/cleareconDL 2>/dev/null | wc -l || true)
+          echo "gehc2025:      " $(ls -1 src/content/gehc2025 2>/dev/null | wc -l || true)
           echo "Recent files (clearecondl):"
           ls -lt src/content/clearecondl 2>/dev/null | head -n 10 || true
           echo "Recent files (cleareconDL):"
           ls -lt src/content/cleareconDL 2>/dev/null | head -n 10 || true
+          echo "Recent files (gehc2025):"
+          ls -lt src/content/gehc2025 2>/dev/null | head -n 10 || true
 
       - name: Commit generated content back to repo
         run: |
@@ -94,3 +104,4 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
