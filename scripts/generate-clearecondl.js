@@ -1,7 +1,7 @@
 // scripts/generate-clearecondl.js
-// Colonne “CleaRecon DL / CleareconDL / #clearecondl” — backfill (tout ce qu’on trouve)
+// Colonne “CleaRecon DL / CleareconDL / #clearecondl” — backfill + filtre LinkedIn strict
 // Sources : Google News (web + LinkedIn via site:), Bing News, YouTube Search (+ chaînes optionnelles),
-//           Reddit (optionnel), LinkedIn via RSSHub (optionnel)
+//           Reddit (optionnel), LinkedIn via RSSHub (optionnel). Filtrage LinkedIn => ne garder que des POSTS.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -16,7 +16,7 @@ const OUT_DIRS = [OUT_DIR_MAIN, OUT_DIR_ALT];
 
 const REQUEST_TIMEOUT_MS = 12_000;
 const MAX_RETRIES = 2;
-const USER_AGENT = "clearecondl/1.3 (+https://github.com/)";
+const USER_AGENT = "clearecondl/1.4 (+https://github.com/)";
 
 // Variantes de mots-clés (insensibles à la casse côté moteurs)
 const QUERIES = [
@@ -55,14 +55,14 @@ const SEARCH_FEEDS = [
   { name: "Google News (web)",   url: "https://news.google.com/rss/search?q={q}&hl=fr&gl=FR&ceid=FR:fr" },
   { name: "Bing News (web)",     url: "https://www.bing.com/news/search?q={q}&format=RSS" },
 
-  // LinkedIn via Google News (filtre domaine)
+  // LinkedIn via Google/Bing (filtre domaine) — on filtrera ensuite côté URL
   { name: "Google News (LinkedIn)", url: "https://news.google.com/rss/search?q={q}+site%3Alinkedin.com&hl=fr&gl=FR&ceid=FR:fr" },
   { name: "Bing News (LinkedIn)",   url: "https://www.bing.com/news/search?q={q}+site%3Alinkedin.com&format=RSS" },
 
   // YouTube : recherche (flux officiel)
   { name: "YouTube Search", url: "https://www.youtube.com/feeds/videos.xml?search_query={q}" },
 
-  // Reddit (facultatif mais utile)
+  // Reddit (facultatif)
   { name: "Reddit", url: "https://www.reddit.com/search.rss?q={q}" },
 ];
 
@@ -95,6 +95,9 @@ function normalizeUrl(u) {
     const x = new URL(u);
     return (x.origin + x.pathname).replace(/\/+$/, "").toLowerCase();
   } catch { return String(u).toLowerCase(); }
+}
+function hostnameOf(u) {
+  try { return new URL(u).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; }
 }
 function yaml(frontmatter) {
   const esc = (v) => String(v).replace(/"/g, '\\"');
@@ -146,6 +149,54 @@ async function fetchOgImage(articleUrl) {
       .filter(Boolean);
     return candidates[0] || null;
   } catch { return null; }
+}
+
+/* ---- Filtrage dur LinkedIn + mots-clés ---- */
+
+// mots-clés stricts dans titre/summary/link
+const STRICT_KEYWORD_RE = /\b(clearecondl|clea\s*recon\s*dl)\b/i;
+
+function classifyLinkedIn(u) {
+  try {
+    const { pathname } = new URL(u);
+    const p = pathname.toLowerCase();
+
+    if (p.includes("/feed/update/urn:li:activity:")) return "post";
+    if (p.startsWith("/posts/")) return "post"; // format /posts/<handle>_<id>...
+
+    if (p.startsWith("/in/")) {
+      // profil perso ; on évite sauf si sous-chemin "recent-activity" ou "posts"
+      if (p.includes("/recent-activity/") || p.includes("/posts/")) return "profile-posts";
+      return "profile";
+    }
+
+    if (p.startsWith("/company/"))  return "company";
+    if (p.startsWith("/jobs"))      return "jobs";
+    if (p.startsWith("/learning"))  return "learning";
+    if (p.startsWith("/pulse/"))    return "pulse";
+    if (p.startsWith("/school/"))   return "school";
+    if (p.startsWith("/events/"))   return "events";
+    if (p.startsWith("/showcase/")) return "showcase";
+
+    return "other";
+  } catch { return "none"; }
+}
+
+function isRelevantItem(it) {
+  const text = `${it.title || ""} ${it.summary || ""}`.toLowerCase();
+  // Vérif mots-clés (sécurité : certains moteurs renvoient du bruit)
+  if (!STRICT_KEYWORD_RE.test(text) && !STRICT_KEYWORD_RE.test((it.link || "").toLowerCase())) {
+    return false;
+  }
+
+  // Filtre spécifique LinkedIn
+  const host = hostnameOf(it.link);
+  if (host.endsWith("linkedin.com")) {
+    const cls = classifyLinkedIn(it.link);
+    // n’accepter que de vrais posts (ou pages "recent-activity/posts" d’un profil)
+    if (!(cls === "post" || cls === "profile-posts")) return false;
+  }
+  return true;
 }
 
 function ensureDirs() {
@@ -201,7 +252,7 @@ async function main() {
     }
   }
 
-  // 3) (Optionnel) LinkedIn via RSSHub — posts de pages entreprise
+  // 3) (Optionnel) LinkedIn via RSSHub — posts de pages entreprise (lien pointe souvent vers linkedin.com)
   if (RSSHUB_BASE && LINKEDIN_COMPANY_IDS.length) {
     for (const id of LINKEDIN_COMPANY_IDS) {
       const url = `${RSSHUB_BASE}/linkedin/company/${encodeURIComponent(id)}/posts`;
@@ -217,7 +268,7 @@ async function main() {
     }
   }
 
-  // Dé-dup (par lien normalisé) + tri chrono desc
+  // Dé-dup (par lien normalisé)
   const uniq = [];
   const seenLinks = new Set();
   for (const it of all) {
@@ -226,11 +277,16 @@ async function main() {
     seenLinks.add(key);
     uniq.push(it);
   }
-  uniq.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
+
+  // 🔎 Filtrage mots-clés + LinkedIn (posts uniquement)
+  const filtered = uniq.filter(isRelevantItem);
+
+  // Tri chrono desc
+  filtered.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
 
   // Écriture des fichiers (dans les 2 dossiers)
   let created = 0;
-  for (const it of uniq) {
+  for (const it of filtered) {
     if (created >= MAX_ITEMS) break;
 
     const key = normalizeUrl(it.link);
@@ -269,7 +325,7 @@ async function main() {
     created++;
   }
 
-  console.log(`✅ CleaReconDL: ${created} fichier(s) ajouté(s). Total unique trouvés: ${uniq.length}`);
+  console.log(`✅ CleaReconDL: ${created} fichier(s) ajouté(s) sur ${filtered.length} pertinents (sur ${uniq.length} uniques bruts).`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
