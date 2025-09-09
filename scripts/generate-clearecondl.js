@@ -1,6 +1,7 @@
 // scripts/generate-clearecondl.js
-// Colonne “CleaRecon DL / CleareconDL / #clearecondl”
-// Sources : Google News (web + LinkedIn via site:), YouTube Search, (optionnel) LinkedIn via RSSHub company posts.
+// Colonne “CleaRecon DL / CleareconDL / #clearecondl” — backfill (tout ce qu’on trouve)
+// Sources : Google News (web + LinkedIn via site:), Bing News, YouTube Search (+ chaînes optionnelles),
+//           Reddit (optionnel), LinkedIn via RSSHub (optionnel)
 
 import fs from "node:fs";
 import path from "node:path";
@@ -9,16 +10,23 @@ import { parseStringPromise } from "xml2js";
 import slugify from "slugify";
 
 /* ---- CONFIG ---- */
-const OUT_DIR = path.join("src", "content", "clearecondl");
-const REQUEST_TIMEOUT_MS = 10_000;
-const MAX_RETRIES = 2;
-const USER_AGENT = "clearecondl/1.2 (+https://github.com/)";
+const OUT_DIR_MAIN = path.join("src", "content", "clearecondl"); // minuscule
+const OUT_DIR_ALT  = path.join("src", "content", "cleareconDL"); // camel (si ta page l’utilise)
+const OUT_DIRS = [OUT_DIR_MAIN, OUT_DIR_ALT];
 
-// Mots/hashtags (insensibles à la casse côté moteurs)
+const REQUEST_TIMEOUT_MS = 12_000;
+const MAX_RETRIES = 2;
+const USER_AGENT = "clearecondl/1.3 (+https://github.com/)";
+
+// Variantes de mots-clés (insensibles à la casse côté moteurs)
 const QUERIES = [
   `"CleaRecon DL"`,
   `"CleareconDL"`,
-  `#clearecondl`
+  `#clearecondl`,
+  `"CleaRecon"`,
+  `"Clearecon"`,
+  `"Clear Recon DL"`,
+  `"ClearEcon DL"`
 ];
 
 // (Optionnel) YouTube : tu peux pinner des chaînes en plus de la recherche
@@ -27,26 +35,34 @@ const YT_CHANNEL_IDS = (process.env.YT_CHANNEL_IDS || "") // "UCxxxx,UCyyyy"
   .map((s) => s.trim())
   .filter(Boolean);
 
-// (Optionnel) LinkedIn via RSSHub (self-hosté conseillé).
-// Ex.: export RSSHUB_BASE="https://rsshub.example.com"
-//      export LINKEDIN_COMPANY_IDS="1337,2414183"
+// (Optionnel) LinkedIn via RSSHub (self-host conseillé).
+// export RSSHUB_BASE="https://rsshub.example.com"
+// export LINKEDIN_COMPANY_IDS="1337,2414183"
 const RSSHUB_BASE = (process.env.RSSHUB_BASE || "").replace(/\/+$/, "");
 const LINKEDIN_COMPANY_IDS = (process.env.LINKEDIN_COMPANY_IDS || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 
+// (Optionnel) Limite max d’items écrits (sinon illimité)
+const MAX_ITEMS = parseInt(process.env.CLEARECONDL_MAX_ITEMS || "", 10) || Infinity;
+
 /* ---- SEARCH FEEDS ----
    {q} sera remplacé par encodeURIComponent(query)
 */
 const SEARCH_FEEDS = [
-  // Web (actu) : Google News RSS
-  { name: "Google News (web)", url: "https://news.google.com/rss/search?q={q}&hl=fr&gl=FR&ceid=FR:fr" },
+  // Web (actu) — Google News et Bing News (les deux !)
+  { name: "Google News (web)",   url: "https://news.google.com/rss/search?q={q}&hl=fr&gl=FR&ceid=FR:fr" },
+  { name: "Bing News (web)",     url: "https://www.bing.com/news/search?q={q}&format=RSS" },
+
   // LinkedIn via Google News (filtre domaine)
   { name: "Google News (LinkedIn)", url: "https://news.google.com/rss/search?q={q}+site%3Alinkedin.com&hl=fr&gl=FR&ceid=FR:fr" },
+  { name: "Bing News (LinkedIn)",   url: "https://www.bing.com/news/search?q={q}+site%3Alinkedin.com&format=RSS" },
+
   // YouTube : recherche (flux officiel)
   { name: "YouTube Search", url: "https://www.youtube.com/feeds/videos.xml?search_query={q}" },
-  // Reddit (utile si la thématique remonte là-bas)
+
+  // Reddit (facultatif mais utile)
   { name: "Reddit", url: "https://www.reddit.com/search.rss?q={q}" },
 ];
 
@@ -132,21 +148,30 @@ async function fetchOgImage(articleUrl) {
   } catch { return null; }
 }
 
-async function main() {
-  fs.mkdirSync(OUT_DIR, { recursive: true });
-
-  // Anti-doublon : liens déjà générés
+function ensureDirs() {
+  for (const d of OUT_DIRS) fs.mkdirSync(d, { recursive: true });
+}
+function readExisting() {
   const seen = new Set();
-  for (const f of fs.readdirSync(OUT_DIR)) {
-    if (!f.endsWith(".md")) continue;
-    const txt = fs.readFileSync(path.join(OUT_DIR, f), "utf-8");
-    const m = txt.match(/sourceUrl:\s*"([^"]+)"/);
-    if (m) seen.add(normalizeUrl(m[1]));
+  for (const dir of OUT_DIRS) {
+    if (!fs.existsSync(dir)) continue;
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".md")) continue;
+      const txt = fs.readFileSync(path.join(dir, f), "utf-8");
+      const m = txt.match(/sourceUrl:\s*"([^"]+)"/);
+      if (m) seen.add(normalizeUrl(m[1]));
+    }
   }
+  return seen;
+}
+
+async function main() {
+  ensureDirs();
+  const seenExisting = readExisting();
 
   const all = [];
 
-  // 1) Google News / YouTube Search / Reddit
+  // 1) Google News / Bing News / YouTube Search / Reddit
   for (const q of QUERIES) {
     for (const feed of SEARCH_FEEDS) {
       const url = feed.url.replace("{q}", encodeURIComponent(q));
@@ -192,7 +217,7 @@ async function main() {
     }
   }
 
-  // Dé-dup (par lien normalisé) + tri chrono
+  // Dé-dup (par lien normalisé) + tri chrono desc
   const uniq = [];
   const seenLinks = new Set();
   for (const it of all) {
@@ -203,11 +228,13 @@ async function main() {
   }
   uniq.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
 
-  // Écriture des fichiers
+  // Écriture des fichiers (dans les 2 dossiers)
   let created = 0;
   for (const it of uniq) {
+    if (created >= MAX_ITEMS) break;
+
     const key = normalizeUrl(it.link);
-    if (seen.has(key)) continue;
+    if (seenExisting.has(key)) continue;
 
     const d = new Date(it.dateISO);
     const yyyy = d.getUTCFullYear();
@@ -215,7 +242,6 @@ async function main() {
     const dd = String(d.getUTCDate()).padStart(2, "0");
     const niceDate = `${yyyy}-${mm}-${dd}`;
     const base = `${niceDate}-${slugify(it.title, { lower: true, strict: true }).slice(0, 80)}`;
-    const file = path.join(OUT_DIR, `${base}.md`);
 
     const imageUrl = await fetchOgImage(it.link);
 
@@ -235,11 +261,15 @@ async function main() {
       (imageUrl ? `![${it.title}](${imageUrl})\n\n` : "") +
       `## Résumé\n\n${fm.summary}\n\n## Lien\n\n${it.link}\n`;
 
-    fs.writeFileSync(file, `---\n${yaml(fm)}---\n\n${body}`, "utf-8");
+    const fileName = `${base}.md`;
+    for (const dir of OUT_DIRS) {
+      const filePath = path.join(dir, fileName);
+      fs.writeFileSync(filePath, `---\n${yaml(fm)}---\n\n${body}`, "utf-8");
+    }
     created++;
   }
 
-  console.log(`✅ CleaReconDL: ${created} fichier(s) ajouté(s).`);
+  console.log(`✅ CleaReconDL: ${created} fichier(s) ajouté(s). Total unique trouvés: ${uniq.length}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
