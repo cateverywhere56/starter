@@ -53,6 +53,9 @@ jobs:
       # 👉 Colonne droite 2 : LinkedIn posts CleaReconDL
       - name: Generate LinkedIn posts (CleaReconDL)
         run: npm run generate:li-clearecondl
+        env:
+          AZURE_BING_KEY: ${{ secrets.AZURE_BING_KEY }}   # 🔑 Clé Bing Web Search API v7
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}         # 🔑 (optionnel) Clé SerpAPI
 
       # 🔎 Diagnostics : vérifie les fichiers générés
       - name: Debug counts
