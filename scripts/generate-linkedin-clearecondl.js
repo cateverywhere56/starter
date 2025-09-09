@@ -1,7 +1,7 @@
 // scripts/generate-linkedin-clearecondl.js
-// v5 — LinkedIn posts contenant : #cleareconDL | "CleaRecon DL" | "CleaReconDL"
-// Ordre : 1) Bing API 2) SerpAPI 3) Google HTML 4) Yahoo HTML 5) Fallback Bing/DDG HTML (slow)
-// Pagination PERSISTANTE (./src/content/li-clearecondl/.serp-state.json) pour éviter les 429.
+// v5.1 — LinkedIn posts contenant : #cleareconDL | "CleaRecon DL" | "CleaReconDL"
+// Ordre : 1) Bing API 2) SerpAPI 3) Google HTML 4) Yahoo HTML 5) Fallback Bing/DDG (lent)
+// État PERSISTANT + MIGRATION auto des anciens .serp-state.json
 
 import fs from "node:fs";
 import path from "node:path";
@@ -21,12 +21,13 @@ const QUERY_VARIANTS = [
   '"CleaReconDL"',
 ];
 
-// Pagination par source (on avance à chaque run)
+// Pagination par source
 const BING_OFFSETS   = [0, 50, 100, 150, 200];
 const SERPAPI_STARTS = [0, 100, 200, 300];
 const GOOGLE_STARTS  = [0, 10, 20, 30, 40];
-const YAHOO_BS       = [1, 11, 21, 31, 41]; // Yahoo: param 'b' (1-based)
+const YAHOO_BS       = [1, 11, 21, 31, 41]; // param 'b' (1-based)
 
+/* ----------------- HTTP utils ----------------- */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function timedFetch(url, opts = {}, retries = RETRIES) {
   for (let i = 0; ; i++) {
@@ -76,29 +77,48 @@ function isLikelyPost(u) {
   } catch { return false; }
 }
 
-/* ----------------- State ----------------- */
+/* ----------------- State + migration ----------------- */
+function defaultState() {
+  return {
+    source: null,
+    bing:    Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
+    serpapi: Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
+    google:  Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
+    yahoo:   Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
+    fallback: { step: 0 },
+  };
+}
+function migrateState(s) {
+  const d = defaultState();
+  const out = { ...d, ...(s && typeof s === "object" ? s : {}) };
+
+  // Assure chaque section + clés par requête
+  for (const section of ["bing","serpapi","google","yahoo"]) {
+    if (!out[section] || typeof out[section] !== "object") out[section] = {};
+    for (const q of QUERY_VARIANTS) {
+      if (!Number.isInteger(out[section][q])) out[section][q] = 0;
+    }
+  }
+  if (!out.fallback || typeof out.fallback !== "object") out.fallback = { step: 0 };
+  if (!Number.isInteger(out.fallback.step)) out.fallback.step = 0;
+  if (!("source" in out)) out.source = null;
+
+  return out;
+}
 function readState() {
   try {
-    if (!fs.existsSync(STATE_FILE)) {
-      return {
-        source: null,
-        bing:    Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
-        serpapi: Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
-        google:  Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
-        yahoo:   Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
-        fallback: { step: 0 },
-      };
+    if (!fs.existsSync(STATE_FILE)) return defaultState();
+    const raw = fs.readFileSync(STATE_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    const merged = migrateState(parsed);
+    if (JSON.stringify(merged) !== JSON.stringify(parsed)) {
+      // migration silencieuse
+      writeState(merged);
+      console.log("[LI] State migré → nouvelle structure.");
     }
-    return JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
+    return merged;
   } catch {
-    return {
-      source: null,
-      bing:    Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
-      serpapi: Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
-      google:  Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
-      yahoo:   Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
-      fallback: { step: 0 },
-    };
+    return defaultState();
   }
 }
 function writeState(s){ ensureDir(OUT_DIR); fs.writeFileSync(STATE_FILE, JSON.stringify(s,null,2),"utf-8"); }
@@ -162,7 +182,7 @@ async function collectFromBingApi(state){
   if(!key) return null;
   const all = new Set();
   for(const q of QUERY_VARIANTS){
-    const idx = state.bing[q] || 0;
+    const idx = Number.isInteger(state.bing?.[q]) ? state.bing[q] : 0;
     const offset = BING_OFFSETS[idx % BING_OFFSETS.length];
     const params = new URLSearchParams({
       q: `site:linkedin.com (${q})`, mkt:"fr-FR", count:"50", offset:String(offset),
@@ -179,7 +199,7 @@ async function collectFromBingApi(state){
       const sn = `${it.snippet || ""} ${it.name || ""}`;
       for (const m of sn.matchAll(LI_POST_RE)) all.add(m[1]);
     }
-    state.bing[q] = (idx + 1) % BING_OFFSETS.length;
+    state.bing ??= {}; state.bing[q] = (idx + 1) % BING_OFFSETS.length;
     await sleep(300);
   }
   state.source = "bing";
@@ -192,7 +212,7 @@ async function collectFromSerpApi(state){
   if(!key) return null;
   const all = new Set();
   for(const q of QUERY_VARIANTS){
-    const idx = state.serpapi[q] || 0;
+    const idx = Number.isInteger(state.serpapi?.[q]) ? state.serpapi[q] : 0;
     const start = SERPAPI_STARTS[idx % SERPAPI_STARTS.length];
     const params = new URLSearchParams({
       engine:"google", q:`site:linkedin.com ${q}`, hl:"fr", gl:"fr", num:"100", start:String(start), api_key:key
@@ -207,7 +227,7 @@ async function collectFromSerpApi(state){
       const text = [r.snippet, r.title].filter(Boolean).join(" ");
       for(const m of text.matchAll(LI_POST_RE)) all.add(m[1]);
     }
-    state.serpapi[q] = (idx + 1) % SERPAPI_STARTS.length;
+    state.serpapi ??= {}; state.serpapi[q] = (idx + 1) % SERPAPI_STARTS.length;
     await sleep(300);
   }
   state.source = "serpapi";
@@ -220,9 +240,7 @@ function GOOGLE_Q(q, start=0){
 }
 function extractGoogleUrls(txt){
   const out = new Set();
-  // Liens directs linkedin
   for(const m of txt.matchAll(LI_POST_RE)) out.add(m[1]);
-  // Liens google redirect (/url?q=...)
   for(const m of txt.matchAll(/https?:\/\/www\.google\.[^/\s]+\/url\?q=([^&\s]+)/gi)){
     try{
       const u = decodeURIComponent(m[1]);
@@ -234,7 +252,7 @@ function extractGoogleUrls(txt){
 async function collectFromGoogleHtml(state){
   const all = new Set();
   for(const q of QUERY_VARIANTS){
-    const idx = state.google[q] || 0;
+    const idx = Number.isInteger(state.google?.[q]) ? state.google[q] : 0;
     const start = GOOGLE_STARTS[idx % GOOGLE_STARTS.length];
     const prox = JINA(GOOGLE_Q(q, start));
     try{
@@ -243,7 +261,7 @@ async function collectFromGoogleHtml(state){
       const text = await res.text();
       extractGoogleUrls(text).forEach(u => all.add(u));
     }catch(e){ console.error("[LI] Google HTML error:", String(e).slice(0,160)); }
-    state.google[q] = (idx + 1) % GOOGLE_STARTS.length;
+    state.google ??= {}; state.google[q] = (idx + 1) % GOOGLE_STARTS.length;
     await sleep(500);
   }
   state.source = "google-html";
@@ -257,7 +275,7 @@ function YAHOO_Q(q, b=1){
 async function collectFromYahooHtml(state){
   const all = new Set();
   for(const q of QUERY_VARIANTS){
-    const idx = state.yahoo[q] || 0;
+    const idx = Number.isInteger(state.yahoo?.[q]) ? state.yahoo[q] : 0;
     const b = YAHOO_BS[idx % YAHOO_BS.length];
     const prox = JINA(YAHOO_Q(q, b));
     try{
@@ -266,18 +284,18 @@ async function collectFromYahooHtml(state){
       const text = await res.text();
       for(const m of text.matchAll(LI_POST_RE)) all.add(m[1]);
     }catch(e){ console.error("[LI] Yahoo HTML error:", String(e).slice(0,160)); }
-    state.yahoo[q] = (idx + 1) % YAHOO_BS.length;
+    state.yahoo ??= {}; state.yahoo[q] = (idx + 1) % YAHOO_BS.length;
     await sleep(500);
   }
   state.source = "yahoo-html";
   return [...all];
 }
 
-/* ----------------- 5) Fallback Bing/DDG HTML (lent) ----------------- */
+/* ----------------- 5) Fallback Bing/DDG (lent) ----------------- */
 const BING_HTML = (q, first=1) => `https://www.bing.com/search?q=${encodeURIComponent(`site:linkedin.com (${q})`)}&setlang=fr&count=50&first=${first}`;
 const DDG_HTML  = (q, s=0)       => `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&s=${s}`;
 async function collectFromFallback(state){
-  const step = state.fallback.step || 0;
+  const step = Number.isInteger(state.fallback?.step) ? state.fallback.step : 0;
   const pages = [
     ...QUERY_VARIANTS.map((q,i)=>({ type:"bing", q, first: BING_OFFSETS[(step+i)%BING_OFFSETS.length] || 1 })),
     ...QUERY_VARIANTS.map((q,i)=>({ type:"ddg",  q, s:     SERPAPI_STARTS[(step+i)%SERPAPI_STARTS.length] || 0 })),
@@ -294,6 +312,7 @@ async function collectFromFallback(state){
     }catch(e){ console.error("[LI] Fallback error:", String(e).slice(0,160)); }
     await sleep(400);
   }
+  state.fallback ??= { step: 0 };
   state.fallback.step = (step + 1) % 8;
   state.source = "fallback";
   return [...all];
@@ -302,31 +321,22 @@ async function collectFromFallback(state){
 /* ----------------- MAIN ----------------- */
 async function main(){
   ensureDir(OUT_DIR);
-  const state = readState();
+  const state = readState(); // ← MIGRE auto si besoin
 
   let links = null;
 
-  // 1) Bing API
-  links = await collectFromBingApi(state);
+  try { links = await collectFromBingApi(state); } catch(e){ console.error(e); }
   if(!links || !links.length){
-    // 2) SerpAPI
-    const l2 = await collectFromSerpApi(state);
-    if(l2 && l2.length) links = l2;
+    try { const l2 = await collectFromSerpApi(state); if(l2 && l2.length) links = l2; } catch(e){ console.error(e); }
   }
   if(!links || !links.length){
-    // 3) Google HTML
-    const l3 = await collectFromGoogleHtml(state);
-    if(l3 && l3.length) links = l3;
+    try { const l3 = await collectFromGoogleHtml(state); if(l3 && l3.length) links = l3; } catch(e){ console.error(e); }
   }
   if(!links || !links.length){
-    // 4) Yahoo HTML
-    const l4 = await collectFromYahooHtml(state);
-    if(l4 && l4.length) links = l4;
+    try { const l4 = await collectFromYahooHtml(state); if(l4 && l4.length) links = l4; } catch(e){ console.error(e); }
   }
   if(!links || !links.length){
-    // 5) Fallback Bing/DDG
-    const l5 = await collectFromFallback(state);
-    links = l5 || [];
+    try { const l5 = await collectFromFallback(state); links = l5 || []; } catch(e){ console.error(e); links = []; }
   }
 
   writeState(state);
