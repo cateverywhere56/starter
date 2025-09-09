@@ -1,9 +1,9 @@
 // scripts/generate-clearecondl.js
-// v2.2 — CleaReconDL (colonne gauche) 100% auto, sans variables d'env
-// - YouTube GE HealthCare: channel_id fixe (UC04R4GsgwjtoI28q7F3YrLw)
-// - LinkedIn personnes: scraping doux des SERP Bing (via r.jina.ai) -> extraction de vrais POSTS
-//   + fallback recent-activity/posts/ quand dispo
-// - Redirections suivies, dédup, OG meta, backfill
+// v2.3 — CleaReconDL colonne gauche (100% auto, sans ENV)
+// - UA "navigateur" pour éviter 403 (YouTube) et durcir la compatibilité
+// - LinkedIn: AUCUNE requête directe -> tout passe par r.jina.ai (SERP + OG)
+// - YouTube GE HealthCare: channel_id officiel + fallback user
+// - Dédup, suivi de redirections, OG meta, tri, écriture MD
 
 import fs from "node:fs";
 import path from "node:path";
@@ -11,19 +11,17 @@ import fetch from "node-fetch";
 import { parseStringPromise } from "xml2js";
 import slugify from "slugify";
 
-/* ===== Config en dur ===== */
+/* ===== Config ===== */
 const OUT_DIRS = [
   path.join("src", "content", "clearecondl"),
   path.join("src", "content", "cleareconDL"),
 ];
 
-// Mots-clés généraux
 const KEY_QUERIES = [
   `"CleaRecon DL"`, `"CleareconDL"`, `#clearecondl`,
   `"CleaRecon"`, `"Clearecon"`, `"Clear Recon DL"`, `"ClearEcon DL"`,
 ];
 
-// Personnes LinkedIn à suivre (on trouve leurs posts automatiquement)
 const LINKEDIN_PEOPLE = [
   "Charles Nutting",
   "Philip Rackliff",
@@ -34,29 +32,30 @@ const LINKEDIN_PEOPLE = [
   "Ioanne Cartier",
 ];
 
-// YouTube GE HealthCare (ID officiel connu)
-const YT_CHANNEL_IDS = ["UC04R4GsgwjtoI28q7F3YrLw"]; // GE HealthCare
-const YT_USERS = ["gehealthcare"]; // fallback historique
-const YT_HANDLES = ["@gehealthcare"]; // ignoré si channel_id OK, mais on garde au cas où
+// YouTube GE HealthCare
+const YT_CHANNEL_IDS = ["UC04R4GsgwjtoI28q7F3YrLw"]; // confirmé
+const YT_USERS = ["gehealthcare"]; // fallback
 
-// Pas de limite d’écriture
 const MAX_ITEMS = Infinity;
 
-/* ===== Feeds complémentaires (YouTube Search/News/Reddit) ===== */
+/* ===== Feeds complémentaires ===== */
 const SEARCH_FEEDS = [
+  { name: "YouTube Search",         url: "https://www.youtube.com/feeds/videos.xml?search_query={q}" },
   { name: "Google News (web)",      url: "https://news.google.com/rss/search?q={q}&hl=fr&gl=FR&ceid=FR:fr" },
   { name: "Bing News (web)",        url: "https://www.bing.com/news/search?q={q}&format=RSS" },
-  { name: "YouTube Search",         url: "https://www.youtube.com/feeds/videos.xml?search_query={q}" },
   { name: "Reddit",                 url: "https://www.reddit.com/search.rss?q={q}" },
 ];
 
-// Bing web HTML (pas RSS) – on passera par r.jina.ai
+// SERP Bing en HTML (on passera via r.jina.ai)
 const BING_WEB = (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&setlang=fr`;
 
 /* ===== Utils ===== */
-const REQUEST_TIMEOUT_MS = 12000;
+const REQUEST_TIMEOUT_MS = 15000;
 const MAX_RETRIES = 2;
-const USER_AGENT = "clearecondl/2.2 (+https://github.com/)";
+// 👇 UA navigateur pour lever les blocages
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/124.0.0.0 Safari/537.36";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function timedFetch(url, opts = {}, retries = MAX_RETRIES) {
@@ -67,7 +66,11 @@ async function timedFetch(url, opts = {}, retries = MAX_RETRIES) {
       const res = await fetch(url, {
         redirect: "follow",
         ...opts,
-        headers: { "User-Agent": USER_AGENT, "Accept-Language": "fr,fr-FR;q=0.9,en;q=0.8", ...(opts.headers || {}) },
+        headers: {
+          "User-Agent": USER_AGENT,
+          "Accept-Language": "fr,fr-FR;q=0.9,en;q=0.8",
+          ...(opts.headers || {}),
+        },
         signal: ctrl.signal,
       });
       clearTimeout(t);
@@ -75,7 +78,7 @@ async function timedFetch(url, opts = {}, retries = MAX_RETRIES) {
     } catch (err) {
       clearTimeout(t);
       if (attempt >= retries) throw err;
-      await sleep(400 * (attempt + 1));
+      await sleep(500 * (attempt + 1));
     }
   }
 }
@@ -90,7 +93,7 @@ function yaml(frontmatter) {
 
 /* ===== RSS helpers ===== */
 async function fetchFeed(url) {
-  const res = await timedFetch(url);
+  const res = await timedFetch(url, { headers: { Accept: "application/rss+xml,text/xml;q=0.9,*/*;q=0.1" } });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   const xml = await res.text();
   const parsed = await parseStringPromise(xml, { explicitArray: false });
@@ -128,20 +131,29 @@ function needsResolve(u, sourceName = "") {
 
 /* ===== OG meta ===== */
 async function fetchOgMeta(articleUrl) {
+  const h = hostOf(articleUrl);
+  // ⚠️ LinkedIn : passer via lecteur r.jina.ai
+  const target =
+    h.endsWith("linkedin.com")
+      ? `https://r.jina.ai/http://${articleUrl.replace(/^https?:\/\//, "")}`
+      : articleUrl;
+
   try {
-    const res = await timedFetch(articleUrl, { headers: { Accept: "text/html" } });
+    const res = await timedFetch(target, { headers: { Accept: "text/html" } });
     if (!res.ok) return { title: "", desc: "", image: null };
     const html = await res.text();
     const pick = (re) => html.match(re)?.[1] || "";
     const image = [ /<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i,
                     /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/i ]
-                  .map(re => pick(re))
-                  .map(u => { try { return new URL(u, articleUrl).href; } catch { return ""; } })
-                  .find(Boolean) || null;
+      .map(re => pick(re))
+      .map(u => { try { return new URL(u, articleUrl).href; } catch { return ""; } })
+      .find(Boolean) || null;
     const title = pick(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["']/i) || "";
     const desc  = pick(/<meta[^>]+property=["']og:description["'][^>]*content=["']([^"']+)["']/i) || "";
     return { title: cleanText(title), desc: cleanText(desc), image };
-  } catch { return { title: "", desc: "", image: null }; }
+  } catch {
+    return { title: "", desc: "", image: null };
+  }
 }
 
 /* ===== Matching ===== */
@@ -165,81 +177,88 @@ function classifyLinkedIn(u) {
       if (p.includes("/recent-activity/") && p.includes("/posts/")) return "profile-posts";
       return "profile";
     }
-    if (p.startsWith("/company/")) return "company";
-    if (p.startsWith("/jobs")) return "jobs";
-    if (p.startsWith("/learning")) return "learning";
-    if (p.startsWith("/pulse/")) return "pulse";
     return "other";
   } catch { return "none"; }
 }
 
-/* ===== YouTube (handle -> channel_id, si jamais on en a besoin) ===== */
-async function resolveYouTubeChannelIdFromHandle(handle) {
-  let h = handle.trim();
-  if (!h.startsWith("@")) h = "@" + h;
-  const url = `https://www.youtube.com/${encodeURIComponent(h)}`;
-  try {
-    const res = await timedFetch(url, { headers: { Accept: "text/html" } });
-    if (!res.ok) throw new Error(String(res.status));
-    const html = await res.text();
-    let m = html.match(/"channelId":"(UC[0-9A-Za-z_-]{22})"/);
-    if (m?.[1]) return m[1];
-    m = html.match(/href="\/channel\/(UC[0-9A-Za-z_-]{22})"/);
-    if (m?.[1]) return m[1];
-    m = html.match(/property="og:url"[^>]+content="https:\/\/www\.youtube\.com\/channel\/(UC[0-9A-Za-z_-]{22})"/i);
-    if (m?.[1]) return m[1];
-  } catch (e) {
-    console.error("resolveYouTubeChannelIdFromHandle error:", handle, String(e).slice(0,160));
+/* ===== YouTube ===== */
+async function collectYouTube(raw, bump) {
+  for (const ch of YT_CHANNEL_IDS) {
+    const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(ch)}`;
+    try {
+      const entries = await fetchFeed(url);
+      bump(`YouTube Channel: ${ch}`, entries.length);
+      for (const e of entries) raw.push(toItem(e, `YouTube Channel: ${ch}`));
+    } catch (err) {
+      console.error("YouTube channel feed error:", ch, String(err).slice(0, 160));
+    }
   }
-  return null;
+  for (const user of YT_USERS) {
+    const url = `https://www.youtube.com/feeds/videos.xml?user=${encodeURIComponent(user)}`;
+    try {
+      const entries = await fetchFeed(url);
+      bump(`YouTube User: ${user}`, entries.length);
+      for (const e of entries) raw.push(toItem(e, `YouTube User: ${user}`));
+    } catch (err) {
+      console.error("YouTube user feed error:", user, String(err).slice(0, 160));
+    }
+  }
 }
 
-/* ===== LinkedIn discovery ===== */
-// Scrape Bing HTML via r.jina.ai et extrait des URLs linkedin posts / activity
-async function scrapeBingForLinkedInPosts(query, label, max = 12) {
-  const proxy = `https://r.jina.ai/http://${BING_WEB(query).replace(/^https?:\/\//, "")}`;
-  try {
-    const res = await timedFetch(proxy, { headers: { Accept: "text/plain" } });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    const text = await res.text();
+/* ===== LinkedIn discovery via r.jina.ai ===== */
+const JINA = (absoluteUrl) => `https://r.jina.ai/http://${absoluteUrl.replace(/^https?:\/\//,"")}`;
 
-    const links = new Set();
-    // posts :
-    for (const m of text.matchAll(/https:\/\/www\.linkedin\.com\/posts\/[^\s")]+/g)) {
-      links.add(m[0]);
-      if (links.size >= max) break;
-    }
-    // activities :
-    if (links.size < max) {
-      for (const m of text.matchAll(/https:\/\/www\.linkedin\.com\/feed\/update\/urn:li:activity:[0-9A-Za-z_-]+/g)) {
-        links.add(m[0]);
-        if (links.size >= max) break;
+// SERP Bing -> extrait des posts linkedin
+async function scrapeBingForLinkedInPosts(person, max = 12) {
+  const queries = [
+    `site:linkedin.com/posts/ "${person}"`,
+    `site:linkedin.com/feed/update "${person}"`,
+  ];
+  const items = [];
+  const seen = new Set();
+
+  for (const q of queries) {
+    const proxied = JINA(BING_WEB(q));
+    try {
+      const res = await timedFetch(proxied, { headers: { Accept: "text/plain" } });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const text = await res.text();
+
+      const push = (u) => {
+        const key = normalizeUrl(u);
+        if (seen.has(key)) return;
+        seen.add(key);
+        items.push({
+          title: "Post LinkedIn",
+          summary: "",
+          link: u,
+          dateISO: new Date().toISOString(),
+          source: `Bing SERP (LI post) — ${person}`,
+        });
+      };
+
+      for (const m of text.matchAll(/https:\/\/www\.linkedin\.com\/posts\/[^\s")]+/g)) {
+        push(m[0]);
+        if (items.length >= max) break;
       }
+      if (items.length < max) {
+        for (const m of text.matchAll(/https:\/\/www\.linkedin\.com\/feed\/update\/urn:li:activity:[0-9A-Za-z_-]+/g)) {
+          push(m[0]);
+          if (items.length >= max) break;
+        }
+      }
+    } catch (err) {
+      console.error("scrapeBingForLinkedInPosts error:", person, q, String(err).slice(0,160));
     }
-
-    const out = [];
-    for (const u of links) {
-      out.push({
-        title: "Post LinkedIn",
-        summary: "",
-        link: u,
-        dateISO: new Date().toISOString(),
-        source: `Bing SERP (LI post) — ${label}`,
-      });
-    }
-    return out;
-  } catch (err) {
-    console.error("scrapeBingForLinkedInPosts error:", label, query, String(err).slice(0,160));
-    return [];
   }
+  return items;
 }
 
-// Si rien trouvé: tenter de trouver le /in/... puis parser recent-activity/posts/
+// Fallback: trouver /in/… puis parser /recent-activity/posts/
 async function findLinkedInProfilesByName(name, max = 2) {
-  const q = `site:linkedin.com/in/ "${name}"`;
-  const proxy = `https://r.jina.ai/http://${BING_WEB(q).replace(/^https?:\/\//, "")}`;
+  const proxied = JINA(BING_WEB(`site:linkedin.com/in/ "${name}"`));
   try {
-    const res = await timedFetch(proxy, { headers: { Accept: "text/plain" } });
+    const res = await timedFetch(proxied, { headers: { Accept: "text/plain" } });
     if (!res.ok) throw new Error(`status ${res.status}`);
     const text = await res.text();
     const links = [];
@@ -256,7 +275,7 @@ async function findLinkedInProfilesByName(name, max = 2) {
 }
 
 async function scrapeRecentPostsFromProfile(profileUrl, maxLinks = 10) {
-  const proxied = `https://r.jina.ai/http://${profileUrl.replace(/^https?:\/\//,"")}/recent-activity/posts/`;
+  const proxied = JINA(`${profileUrl}/recent-activity/posts/`);
   try {
     const res = await timedFetch(proxied, { headers: { Accept: "text/plain" } });
     if (!res.ok) throw new Error(`status ${res.status}`);
@@ -304,12 +323,15 @@ function readExisting() {
 async function main() {
   ensureDirs();
   console.log(`[clearecondl] People: ${LINKEDIN_PEOPLE.join(", ")}`);
-  console.log(`[clearecondl] YouTube: channel_ids=${YT_CHANNEL_IDS.join(", ")||"(none)"} users=${YT_USERS.join(", ")||"(none)"} handles=${YT_HANDLES.join(", ")||"(none)"}`);
+  console.log(`[clearecondl] YouTube: channel_ids=${YT_CHANNEL_IDS.join(", ")||"(none)"} users=${YT_USERS.join(", ")||"(none)"}`);
 
   const raw = [];
   const stats = new Map(); const bump = (k,n=1)=>stats.set(k,(stats.get(k)||0)+n);
 
-  /* 0) Compléments (YouTube Search / News / Reddit) */
+  /* 0) YouTube (avant tout) */
+  await collectYouTube(raw, bump);
+
+  /* 1) Compléments (Search/News/Reddit) */
   for (const q of KEY_QUERIES) {
     for (const feed of SEARCH_FEEDS) {
       const url = feed.url.replace("{q}", encodeURIComponent(q));
@@ -323,64 +345,19 @@ async function main() {
     }
   }
 
-  /* 1) LinkedIn — par personne (scrape SERP Bing) */
+  /* 2) LinkedIn — par personne (SERP Bing via r.jina.ai) */
   for (const person of LINKEDIN_PEOPLE) {
-    // requêtes orientées posts
-    const queries = [
-      `site:linkedin.com/posts/ "${person}"`,
-      `site:linkedin.com/feed/update "${person}"`,
-    ];
-    let found = 0;
-    for (const q of queries) {
-      const items = await scrapeBingForLinkedInPosts(q, person, 12);
-      bump(`LI SERP — ${person}`, items.length);
-      found += items.length;
-      items.forEach((it) => raw.push(it));
-    }
-    // fallback si rien : profil -> recent-activity/posts/
-    if (found === 0) {
-      const profiles = await findLinkedInProfilesByName(person, 2);
-      for (const purl of profiles) {
-        const posts = await scrapeRecentPostsFromProfile(purl, 8);
-        bump(`LI recent-activity — ${person}`, posts.length);
-        posts.forEach((it) => raw.push(it));
-      }
-    }
-  }
+    const posts = await scrapeBingForLinkedInPosts(person, 12);
+    bump(`LI SERP — ${person}`, posts.length);
+    posts.forEach((it) => raw.push(it));
 
-  /* 2) YouTube : channel_id connu + fallbacks */
-  for (const ch of YT_CHANNEL_IDS) {
-    const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(ch)}`;
-    try {
-      const entries = await fetchFeed(url);
-      bump(`YouTube Channel: ${ch}`, entries.length);
-      for (const e of entries) raw.push(toItem(e, `YouTube Channel: ${ch}`));
-    } catch (err) {
-      console.error("YouTube channel feed error:", ch, String(err).slice(0, 160));
-    }
-  }
-  for (const user of YT_USERS) {
-    const url = `https://www.youtube.com/feeds/videos.xml?user=${encodeURIComponent(user)}`;
-    try {
-      const entries = await fetchFeed(url);
-      bump(`YouTube User: ${user}`, entries.length);
-      for (const e of entries) raw.push(toItem(e, `YouTube User: ${user}`));
-    } catch (err) {
-      console.error("YouTube user feed error:", user, String(err).slice(0, 160));
-    }
-  }
-  // (garde handle au cas où)
-  for (const h of YT_HANDLES) {
-    const id = await resolveYouTubeChannelIdFromHandle(h);
-    if (!id) { console.error("YT handle -> channel_id introuvable:", h); continue; }
-    if (YT_CHANNEL_IDS.includes(id)) continue; // déjà couvert
-    const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(id)}`;
-    try {
-      const entries = await fetchFeed(url);
-      bump(`YouTube Handle: ${h} (${id})`, entries.length);
-      for (const e of entries) raw.push(toItem(e, `YouTube Handle: ${h} (${id})`));
-    } catch (err) {
-      console.error("YouTube handle feed error:", h, String(err).slice(0, 160));
+    if (posts.length === 0) {
+      const profiles = await findLinkedInProfilesByName(person, 2);
+      for (const p of profiles) {
+        const rec = await scrapeRecentPostsFromProfile(p, 8);
+        bump(`LI recent-activity — ${person}`, rec.length);
+        rec.forEach((it) => raw.push(it));
+      }
     }
   }
 
@@ -415,11 +392,10 @@ async function main() {
   const filtered = uniq.filter((it) => {
     const host = hostOf(it.link);
     const text = `${it.title || ""} ${it.summary || ""} ${it.link || ""}`;
-
     if (host.endsWith("linkedin.com")) {
       const cls = classifyLinkedIn(it.link);
       if (!(cls === "post" || cls === "profile-posts")) return false;
-      // accepter : mots-clés OU nom de personne OU découverte recent-activity/SERP
+      // accepter si mot-clé OU personne OU découvert via SERP/recent-activity
       if (anyKeyMatch(text) || anyPersonMatch(text)) return true;
       if (/LinkedIn Profile recent-activity|Bing SERP \(LI post\)/.test(it.source)) return true;
       return false;
@@ -440,12 +416,11 @@ async function main() {
     if (already.has(k)) continue;
 
     const d = new Date(it.dateISO);
-    const yyyy = d.getUTCFullYear();
-    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(d.getUTCDate()).padStart(2, "0");
-    const base = `${yyyy}-${mm}-${dd}-${slugify(it.title || "post", { lower: true, strict: true }).slice(0, 80)}`;
+    const base = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}-${slugify(it.title || "post", { lower: true, strict: true }).slice(0, 80)}`;
+
+    // OG meta (avec proxy automatique pour linkedin)
     const meta = await fetchOgMeta(it.link);
-    const imageUrl = meta.image || null;
+    const imageUrl = meta.image || "";
 
     const fm = {
       title: it.title || meta.title || "Post",
@@ -455,7 +430,7 @@ async function main() {
       sourceUrl: it.link,
       permalink: `/clearecondl/${base}`,
       tags: ["CleareconDL", it.source],
-      imageUrl: imageUrl || "",
+      imageUrl,
       imageCredit: imageUrl ? `Image — ${it.link}` : "",
     };
     const body =
@@ -469,7 +444,7 @@ async function main() {
     created++;
   }
 
-  console.log(`✅ CleaReconDL v2.2: ${created} créé(s) — pertinents: ${filtered.length} — bruts: ${raw.length} — uniq après redirection: ${uniq.length}`);
+  console.log(`✅ CleaReconDL v2.3: ${created} créé(s) — pertinents: ${filtered.length} — bruts: ${raw.length} — uniq après redirection: ${uniq.length}`);
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
