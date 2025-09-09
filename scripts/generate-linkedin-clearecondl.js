@@ -1,40 +1,32 @@
 // scripts/generate-linkedin-clearecondl.js
-// v3.1 "slow crawl" — LinkedIn posts contenant : #cleareconDL | CleaRecon DL | CleaReconDL
-// - 6 requêtes SERP max par run (Bing + DuckDuckGo × 3 variantes) via r.jina.ai
-// - Pagination PERSISTANTE dans src/content/li-clearecondl/.serp-state.json (committé par CI)
-// - Dédup, enrichissement OG (proxy), écriture .md → src/content/li-clearecondl
+// v4 — LinkedIn posts contenant : #cleareconDL | "CleaRecon DL" | "CleaReconDL"
+// Ordre des sources : 1) Bing Web Search API (AZURE_BING_KEY)  2) SerpAPI (SERPAPI_KEY)  3) Slow-crawl (fallback)
+// Écrit des .md dans src/content/li-clearecondl et persiste la pagination de l’API choisie.
 
 import fs from "node:fs";
 import path from "node:path";
 import fetch from "node-fetch";
 import slugify from "slugify";
 
-/* -------- Config -------- */
+/* ---------- Config ---------- */
 const OUT_DIR = path.join("src", "content", "li-clearecondl");
-const STATE_FILE = path.join(OUT_DIR, ".serp-state.json");
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
+const STATE_FILE = path.join(OUT_DIR, ".serp-state.json"); // stocke offsets/pagination
+const UA = "Mozilla/5.0 (compatible; clearecondl-bot/1.0; +https://example.org)";
 const TIMEOUT = 15000;
-const RETRIES = 2;
+const RETRIES = 1;
 
-// Variantes de requêtes (on reste strict : la SERP porte les mots-clés)
+// Variantes de requêtes (on laisse les mots-clés aux SERP/API)
 const QUERY_VARIANTS = [
   '"#cleareconDL"',
   '"CleaRecon DL"',
   '"CleaReconDL"',
 ];
 
-// Offsets que l'on va parcourir progressivement (pas tous d’un coup)
-const BING_OFFSETS = [1, 51, 101, 151, 201];       // ~5 pages par variante au total
-const DDG_OFFSETS  = [0, 50, 100, 150, 200, 250];  // idem
+// Pagination par source
+const BING_OFFSETS = [0, 50, 100, 150, 200]; // 'offset' (count=50)
+const SERPAPI_STARTS = [0, 100, 200, 300];   // 'start' (num=100)
 
-const BING_Q = (q, first) =>
-  `https://www.bing.com/search?q=${encodeURIComponent(`site:linkedin.com (${q})`)}&setlang=fr&count=50&first=${first}`;
-const DDG_Q = (q, s) =>
-  `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&s=${s}`;
-const JINA = (u) => `https://r.jina.ai/http://${u.replace(/^https?:\/\//, "")}`;
-
-/* -------- Utils HTTP -------- */
+/* ---------- Helpers ---------- */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function timedFetch(url, opts = {}, retries = RETRIES) {
   for (let i = 0; ; i++) {
@@ -44,7 +36,11 @@ async function timedFetch(url, opts = {}, retries = RETRIES) {
       const res = await fetch(url, {
         redirect: "follow",
         ...opts,
-        headers: { "User-Agent": UA, "Accept-Language": "fr,fr-FR;q=0.9,en;q=0.8", ...(opts.headers || {}) },
+        headers: {
+          "User-Agent": UA,
+          "Accept-Language": "fr,fr-FR;q=0.9,en;q=0.8",
+          ...(opts.headers || {}),
+        },
         signal: ctrl.signal,
       });
       clearTimeout(t);
@@ -56,21 +52,19 @@ async function timedFetch(url, opts = {}, retries = RETRIES) {
     }
   }
 }
-
-/* -------- Helpers -------- */
 function ensureDir(d) { fs.mkdirSync(d, { recursive: true }); }
 function clean(s = "") { return String(s).replace(/\s+/g, " ").trim(); }
 function normalizeUrl(u) { try { const x = new URL(u); return (x.origin + x.pathname).replace(/\/+$/, "").toLowerCase(); } catch { return String(u || "").toLowerCase(); } }
 function yaml(frontmatter) {
   const esc = (v) => String(v).replace(/"/g, '\\"');
-  return Object.entries(frontmatter).map(([k,v]) => Array.isArray(v)
-    ? `${k}: [${v.map(x=>`"${esc(x)}"`).join(", ")}]`
-    : `${k}: "${esc(v)}"`).join("\n") + "\n";
+  return Object.entries(frontmatter).map(([k,v]) =>
+    Array.isArray(v) ? `${k}: [${v.map(x=>`"${esc(x)}"`).join(", ")}]` : `${k}: "${esc(v)}"`
+  ).join("\n") + "\n";
 }
 
-/* -------- Détection d'URL de post -------- */
+// Reconnaître les posts LinkedIn (plusieurs formats)
 const LI_POST_RE =
-  /(https?:\/\/(?:[a-z]+\.)?linkedin\.com\/(?:posts\/[^\s"')<>]+|feed\/update\/urn:li:(?:activity|ugcPost|share):[0-9A-Za-z_-]+))/gi;
+  /(https?:\/\/(?:[a-z]+\.)?linkedin\.com\/(?:(?:company\/[^/]+\/posts\/[^\s"')<>]+)|(?:posts\/[^\s"')<>]+)|(?:feed\/update\/urn:li:(?:activity|ugcPost|share):[0-9A-Za-z_-]+)))/gi;
 
 function isLikelyPost(u) {
   try {
@@ -78,37 +72,42 @@ function isLikelyPost(u) {
     return p.startsWith("/posts/") ||
       p.includes("/feed/update/urn:li:activity:") ||
       p.includes("/feed/update/urn:li:ugcpost:") ||
-      p.includes("/feed/update/urn:li:share:");
+      p.includes("/feed/update/urn:li:share:") ||
+      /\/company\/[^/]+\/posts\//.test(p);
   } catch { return false; }
 }
 
-/* -------- État persistant -------- */
+/* ---------- State ---------- */
 function readState() {
   try {
     if (!fs.existsSync(STATE_FILE)) {
       return {
+        source: null, // "bing" | "serpapi" | "fallback"
         bing: Object.fromEntries(QUERY_VARIANTS.map(q => [q, 0])),
-        ddg:  Object.fromEntries(QUERY_VARIANTS.map(q => [q, 0])),
+        serpapi: Object.fromEntries(QUERY_VARIANTS.map(q => [q, 0])),
+        fallback: { step: 0 }
       };
     }
     return JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
   } catch {
     return {
+      source: null,
       bing: Object.fromEntries(QUERY_VARIANTS.map(q => [q, 0])),
-      ddg:  Object.fromEntries(QUERY_VARIANTS.map(q => [q, 0])),
+      serpapi: Object.fromEntries(QUERY_VARIANTS.map(q => [q, 0])),
+      fallback: { step: 0 }
     };
   }
 }
-function writeState(state) {
+function writeState(s) {
   ensureDir(OUT_DIR);
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf-8");
+  fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2), "utf-8");
 }
 
-/* -------- Enrichissement OG (proxy) -------- */
+/* ---------- Enrichissement OG via proxy ---------- */
+const JINA = (u) => `https://r.jina.ai/http://${u.replace(/^https?:\/\//, "")}`;
 async function fetchOgMetaLinkedIn(url) {
-  const proxied = JINA(url);
   try {
-    const res = await timedFetch(proxied, { headers: { Accept: "text/html" } });
+    const res = await timedFetch(JINA(url), { headers: { Accept: "text/html" } });
     if (!res.ok) return { title: "", desc: "", image: null };
     const html = await res.text();
     const pick = (re) => html.match(re)?.[1] || "";
@@ -126,7 +125,7 @@ async function fetchOgMetaLinkedIn(url) {
   }
 }
 
-/* -------- IO des fichiers existants -------- */
+/* ---------- E/S contenus ---------- */
 function readExisting() {
   const set = new Set();
   if (!fs.existsSync(OUT_DIR)) return set;
@@ -138,10 +137,9 @@ function readExisting() {
   }
   return set;
 }
-
 function writeItem(link, meta) {
   ensureDir(OUT_DIR);
-  const d = new Date(); // timestamp d'indexation
+  const d = new Date();
   const yyyy = d.getUTCFullYear();
   const mm = String(d.getUTCMonth()+1).padStart(2,"0");
   const dd = String(d.getUTCDate()).padStart(2,"0");
@@ -163,77 +161,147 @@ function writeItem(link, meta) {
   fs.writeFileSync(file, `---\n${yaml(fm)}---\n\n${body}`, "utf-8");
 }
 
-/* -------- Collecte “slow crawl” -------- */
-async function collectOneBing(q, idx) {
-  const first = BING_OFFSETS[idx % BING_OFFSETS.length];
-  const url = JINA(BING_Q(q, first));
-  try {
-    const res = await timedFetch(url, { headers: { Accept: "text/plain" } });
-    if (!res.ok) { console.error(`[LI] Bing ${res.status} first=${first} q=${q}`); return []; }
-    const text = await res.text();
-    const out = [];
-    for (const m of text.matchAll(LI_POST_RE)) {
-      const u = m[1].replace(/[\.,]$/, "");
-      if (isLikelyPost(u)) out.push(u);
+/* ---------- 1) Bing Web Search API ---------- */
+async function collectFromBingApi(state) {
+  const key = process.env.AZURE_BING_KEY;
+  if (!key) return null;
+
+  const all = new Set();
+  for (const q of QUERY_VARIANTS) {
+    const idx = state.bing[q] || 0;
+    const offset = BING_OFFSETS[idx % BING_OFFSETS.length];
+    const params = new URLSearchParams({
+      q: `site:linkedin.com (${q})`,
+      mkt: "fr-FR",
+      count: "50",
+      offset: String(offset),
+      responseFilter: "Webpages",
+      textDecorations: "false",
+      textFormat: "Raw",
+    });
+    const url = `https://api.bing.microsoft.com/v7.0/search?${params.toString()}`;
+    const res = await timedFetch(url, { headers: { "Ocp-Apim-Subscription-Key": key } });
+    if (!res.ok) {
+      const body = await res.text().catch(()=> "");
+      console.error(`[LI] Bing API ${res.status} offset=${offset} q=${q} :: ${body.slice(0,180)}`);
+      continue;
     }
-    console.log(`[LI] Bing page first=${first} q=${q} → ${out.length} lien(s)`);
-    return out;
-  } catch (e) {
-    console.error("[LI] Bing error:", String(e).slice(0, 160));
-    return [];
+    const data = await res.json();
+    const items = data?.webPages?.value || [];
+    for (const it of items) {
+      const u = it.url;
+      if (typeof u === "string" && isLikelyPost(u)) all.add(u);
+      // parfois le snippet contient d'autres liens : on tente un match
+      const sn = `${it.snippet || ""} ${it.name || ""}`;
+      for (const m of sn.matchAll(LI_POST_RE)) all.add(m[1]);
+    }
+    // avance pagination pour ce q
+    state.bing[q] = (idx + 1) % BING_OFFSETS.length;
   }
+  state.source = "bing";
+  return [...all];
 }
 
-async function collectOneDDG(q, idx) {
-  const s = DDG_OFFSETS[idx % DDG_OFFSETS.length];
-  const url = JINA(DDG_Q(q, s));
-  try {
-    const res = await timedFetch(url, { headers: { Accept: "text/plain" } });
-    if (!res.ok) { console.error(`[LI] DDG ${res.status} s=${s} q=${q}`); return []; }
-    const text = await res.text();
-    const out = [];
-    for (const m of text.matchAll(LI_POST_RE)) {
-      const u = m[1].replace(/[\.,]$/, "");
-      if (isLikelyPost(u)) out.push(u);
+/* ---------- 2) SerpAPI (Google) ---------- */
+async function collectFromSerpApi(state) {
+  const key = process.env.SERPAPI_KEY;
+  if (!key) return null;
+
+  const all = new Set();
+  for (const q of QUERY_VARIANTS) {
+    const idx = state.serpapi[q] || 0;
+    const start = SERPAPI_STARTS[idx % SERPAPI_STARTS.length];
+    const params = new URLSearchParams({
+      engine: "google",
+      q: `site:linkedin.com ${q}`,
+      hl: "fr",
+      gl: "fr",
+      num: "100",
+      start: String(start),
+      api_key: key,
+    });
+    const url = `https://serpapi.com/search.json?${params.toString()}`;
+    const res = await timedFetch(url);
+    if (!res.ok) {
+      const body = await res.text().catch(()=> "");
+      console.error(`[LI] SerpAPI ${res.status} start=${start} q=${q} :: ${body.slice(0,180)}`);
+      continue;
     }
-    console.log(`[LI] DDG page s=${s} q=${q} → ${out.length} lien(s)`);
-    return out;
-  } catch (e) {
-    console.error("[LI] DDG error:", String(e).slice(0, 160));
-    return [];
+    const data = await res.json();
+    const org = data?.organic_results || [];
+    for (const r of org) {
+      const u = r.link;
+      if (typeof u === "string" && isLikelyPost(u)) all.add(u);
+      const rich = r.rich_snippet || {};
+      const html = [r.snippet, rich.top?.extensions?.join(" "), rich.top?.detected_extensions?.join(" ")].filter(Boolean).join(" ");
+      for (const m of html.matchAll(LI_POST_RE)) all.add(m[1]);
+    }
+    state.serpapi[q] = (idx + 1) % SERPAPI_STARTS.length;
   }
+  state.source = "serpapi";
+  return [...all];
 }
 
-/* -------- MAIN -------- */
+/* ---------- 3) Fallback slow-crawl (dernier recours) ---------- */
+const BING_HTML = (q, first=1) => `https://www.bing.com/search?q=${encodeURIComponent(`site:linkedin.com (${q})`)}&setlang=fr&count=50&first=${first}`;
+const DDG_HTML  = (q, s=0)       => `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&s=${s}`;
+async function collectFromFallback(state) {
+  const step = state.fallback.step || 0;
+  const pages = [
+    ...QUERY_VARIANTS.map((q,i)=>({ type:"bing", q, first: BING_OFFSETS[(step+i)%BING_OFFSETS.length] || 0 })),
+    ...QUERY_VARIANTS.map((q,i)=>({ type:"ddg",  q, s:     SERPAPI_STARTS[(step+i)%SERPAPI_STARTS.length] || 0 })),
+  ];
+
+  const all = new Set();
+  for (const p of pages) {
+    const url = p.type === "bing" ? BING_HTML(p.q, p.first || 1) : DDG_HTML(p.q, p.s || 0);
+    const proxied = JINA(url);
+    try {
+      const res = await timedFetch(proxied, { headers: { Accept: "text/plain" } });
+      if (!res.ok) { console.error(`[LI] Fallback ${p.type} ${res.status} q=${p.q}`); continue; }
+      const text = await res.text();
+      for (const m of text.matchAll(LI_POST_RE)) {
+        const u = m[1].replace(/[\.,]$/, "");
+        if (isLikelyPost(u)) all.add(u);
+      }
+    } catch (e) {
+      console.error("[LI] Fallback error:", String(e).slice(0,160));
+    }
+    await sleep(250);
+  }
+  state.fallback.step = (step + 1) % 8;
+  state.source = "fallback";
+  return [...all];
+}
+
+/* ---------- MAIN ---------- */
 async function main() {
   ensureDir(OUT_DIR);
-
-  // Charger/initialiser l'état
   const state = readState();
 
-  // Collecte LIMITÉE par run (6 requêtes max)
-  const tasks = [];
-  for (const q of QUERY_VARIANTS) {
-    tasks.push(collectOneBing(q, state.bing[q] || 0));
-    tasks.push(collectOneDDG(q, state.ddg[q] || 0));
-  }
-  const results = await Promise.all(tasks);
-  const links = [...new Set(results.flat())];
-  console.log(`[LI] Liens uniques collectés ce run: ${links.length}`);
+  let links = null;
 
-  // Avancer l'état (pagination pour le prochain run)
-  for (const q of QUERY_VARIANTS) {
-    state.bing[q] = ((state.bing[q] || 0) + 1) % BING_OFFSETS.length;
-    state.ddg[q]  = ((state.ddg[q]  || 0) + 1) % DDG_OFFSETS.length;
+  // 1) Bing API si clé présente
+  links = await collectFromBingApi(state);
+  if (!links || links.length === 0) {
+    // 2) SerpAPI si clé présente
+    const l2 = await collectFromSerpApi(state);
+    if (l2 && l2.length) links = l2;
   }
+  if (!links || links.length === 0) {
+    // 3) Fallback (lent, sujet aux 429)
+    const l3 = await collectFromFallback(state);
+    links = l3 || [];
+  }
+
   writeState(state);
+  console.log(`[LI] Source utilisée: ${state.source || "none"} — ${links.length} lien(s) collecté(s) ce run.`);
 
   if (!links.length) {
-    console.log("[LI] Rien trouvé ce run (probable throttling). Le slow crawl avancera au prochain run.");
+    console.log("[LI] Aucun lien ce run. Réessaiera au prochain.");
     return;
   }
 
-  // Dé-dup avec existants
   const existing = readExisting();
   const seen = new Set();
   let created = 0;
@@ -254,4 +322,4 @@ async function main() {
   console.log(`✅ LinkedIn CleaReconDL: ${created} fichier(s) généré(s) → ${OUT_DIR}`);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e)=>{ console.error(e); process.exit(1); });
