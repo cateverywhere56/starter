@@ -54,6 +54,13 @@ jobs:
           # Facultatif : pour être exhaustif sur toute l'année 2025
           YT_API_KEY: ${{ secrets.YT_API_KEY }}
 
+      - name: Generate LinkedIn posts (CleaReconDL)
+        run: npm run generate:li-clearecondl
+
+      - name: Debug LI CleaReconDL
+        run: |
+          echo "li-clearecondl:" $(ls -1 src/content/li-clearecondl 2>/dev/null | wc -l || true) ls -lt src/content/li-clearecondl 2>/dev/null | head -n 10 || true
+
       # 🔎 Diagnostic : vérifie que des fichiers ont bien été générés
       - name: Debug counts
         run: |
