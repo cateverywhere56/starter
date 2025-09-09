@@ -2,7 +2,7 @@ name: Daily Paper du jour
 
 on:
   schedule:
-    - cron: '*/15 * * * *'   # toutes les 15 minutes (UTC)
+    - cron: '*/30 * * * *'   # toutes les 30 minutes (UTC)
   workflow_dispatch: {}
   push:
     branches: [ main ]
@@ -35,45 +35,41 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      # 👉 Génération des contenus (colonne principale + colonne gauche)
+      # 👉 Génération des contenus (colonne principale)
       - name: Generate news (papers)
         run: npm run generate
 
+      # 👉 Colonne gauche : CleaReconDL
       - name: Generate CleaReconDL (left column)
         run: npm run generate:clearecondl
-        # Si tu utilises des options via variables, dé-commente et renseigne-les :
-        # env:
-        #   RSSHUB_BASE: ${{ vars.RSSHUB_BASE }}                  # ex: https://rsshub.example.com
-        #   LINKEDIN_COMPANY_IDS: ${{ vars.LINKEDIN_COMPANY_IDS }}# ex: "1337,2414183"
-        #   YT_CHANNEL_IDS: ${{ vars.YT_CHANNEL_IDS }}            # ex: "UCxxxx,UCyyyy"
 
-      # 👉 Nouvelle étape : vidéos GE HealthCare 2025 (colonne droite)
+      # 👉 Colonne droite 1 : GE HealthCare vidéos 2025 (filtrées CleaRecon)
       - name: Generate GE HealthCare videos (2025)
         run: npm run generate:gehc2025
         env:
-          # Facultatif : pour être exhaustif sur toute l'année 2025
+          # (facultatif mais recommandé pour couvrir toute l'année 2025)
           YT_API_KEY: ${{ secrets.YT_API_KEY }}
 
+      # 👉 Colonne droite 2 : LinkedIn posts CleaReconDL
       - name: Generate LinkedIn posts (CleaReconDL)
         run: npm run generate:li-clearecondl
 
-      - name: Debug LI CleaReconDL
-        run: |
-          echo "li-clearecondl:" $(ls -1 src/content/li-clearecondl 2>/dev/null | wc -l || true) ls -lt src/content/li-clearecondl 2>/dev/null | head -n 10 || true
-
-      # 🔎 Diagnostic : vérifie que des fichiers ont bien été générés
+      # 🔎 Diagnostics : vérifie les fichiers générés
       - name: Debug counts
         run: |
           echo "papers:        " $(ls -1 src/content/papers 2>/dev/null | wc -l || true)
           echo "clearecondl:   " $(ls -1 src/content/clearecondl 2>/dev/null | wc -l || true)
           echo "cleareconDL:   " $(ls -1 src/content/cleareconDL 2>/dev/null | wc -l || true)
           echo "gehc2025:      " $(ls -1 src/content/gehc2025 2>/dev/null | wc -l || true)
+          echo "li-clearecondl:" $(ls -1 src/content/li-clearecondl 2>/dev/null | wc -l || true)
           echo "Recent files (clearecondl):"
           ls -lt src/content/clearecondl 2>/dev/null | head -n 10 || true
           echo "Recent files (cleareconDL):"
           ls -lt src/content/cleareconDL 2>/dev/null | head -n 10 || true
           echo "Recent files (gehc2025):"
           ls -lt src/content/gehc2025 2>/dev/null | head -n 10 || true
+          echo "Recent files (li-clearecondl):"
+          ls -lt src/content/li-clearecondl 2>/dev/null | head -n 10 || true
 
       - name: Commit generated content back to repo
         run: |
@@ -111,4 +107,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
