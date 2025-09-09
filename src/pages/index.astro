@@ -5,12 +5,13 @@
  * - Colonne gauche = tout l'historique, avec dédoublonnage par URL finale.
  */
 
-const modules = import.meta.glob('/src/content/papers/*.md', { eager: true });
+// 👉 Chemins RELATIFS depuis src/pages vers src/content
+const modules = import.meta.glob('../content/papers/*.md', { eager: true });
 
 // 👉 importe des DEUX chemins possibles (casse différente) pour la colonne gauche
 const clRaw = {
-  ...import.meta.glob('/src/content/clearecondl/*.md', { eager: true }),
-  ...import.meta.glob('/src/content/cleareconDL/*.md', { eager: true }),
+  ...import.meta.glob('../content/clearecondl/*.md', { eager: true }),
+  ...import.meta.glob('../content/cleareconDL/*.md', { eager: true }),
 };
 
 /* --------- Helpers --------- */
@@ -32,6 +33,10 @@ const brandMap: Record<string, string> = {
   '20minutes.fr': '20 Minutes',
   'ouest-france.fr': 'Ouest-France',
   'lemonde.fr': 'Le Monde',
+  'linkedin.com': 'LinkedIn',
+  'youtube.com': 'YouTube',
+  'youtu.be': 'YouTube',
+  'reddit.com': 'Reddit',
 };
 function brandOf(url: string) {
   const h = hostOf(url);
@@ -124,7 +129,7 @@ const leftPosts = leftPostsAll.filter((p: any) => {
                             </div>
                             <div style="opacity:.75; font-size:12px; margin-bottom:4px;">
                               {new Date(p.date).toLocaleDateString('fr-FR')}
-                              {hostOf(p.sourceUrl) ? ` · ${hostOf(p.sourceUrl)}` : ''}
+                              {hostOf(p.sourceUrl) ? ` · ${brandOf(p.sourceUrl)}` : ''}
                             </div>
                             <div style="font-size:13px; opacity:.9;">
                               {truncate(p.summary, 160)}
