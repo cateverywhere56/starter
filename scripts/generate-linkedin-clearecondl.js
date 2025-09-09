@@ -1,7 +1,8 @@
 // scripts/generate-linkedin-clearecondl.js
-// Récupère des posts LinkedIn contenant : #cleareconDL | CleaRecon DL | CleaReconDL
-// Stratégie : SERP Bing (pages 1..201) via r.jina.ai → liens /posts/... ou /feed/update/urn:li:activity:...
-// On NE REJETE PAS un post si l'OG LinkedIn est générique : on garde (car la SERP a déjà filtré par mots-clés).
+// v3 — Récupère des posts LinkedIn contenant : #cleareconDL | CleaRecon DL | CleaReconDL
+// - Sources SERP: Bing + DuckDuckGo via r.jina.ai (pas d'accès direct à linkedin.com)
+// - Pagination large (Bing: first=1..201 ; DDG: s=0..450)
+// - Déduplication, enrichissement OG (proxy), écriture .md -> src/content/li-clearecondl
 
 import fs from "node:fs";
 import path from "node:path";
@@ -9,26 +10,25 @@ import fetch from "node-fetch";
 import slugify from "slugify";
 
 const OUT_DIR = path.join("src", "content", "li-clearecondl");
-
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 const TIMEOUT = 15000;
-const MAX_RETRIES = 2;
+const RETRIES = 2;
 
-// Requêtes Bing (on multiplie les variantes)
-const BING_QUERIES = [
-  'site:linkedin.com/posts/ ("#cleareconDL" OR "CleaRecon DL" OR "CleaReconDL")',
-  'site:linkedin.com/feed/update ("#cleareconDL" OR "CleaRecon DL" OR "CleaReconDL")',
-  '"#cleareconDL" site:linkedin.com',
-  '"CleaRecon DL" site:linkedin.com',
-  '"CleaReconDL" site:linkedin.com',
+// Variantes de requêtes (les mots-clés sont dans la SERP)
+const QUERY_VARIANTS = [
+  '"#cleareconDL"',
+  '"CleaRecon DL"',
+  '"CleaReconDL"',
 ];
 
-const BING = (q, first = 1) =>
-  `https://www.bing.com/search?q=${encodeURIComponent(q)}&setlang=fr&first=${first}`;
+const BING_Q = (q, first = 1) =>
+  `https://www.bing.com/search?q=${encodeURIComponent(`site:linkedin.com (${q})`)}&setlang=fr&count=50&first=${first}`;
+const DDG_Q = (q, offset = 0) =>
+  `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&s=${offset}`;
 const JINA = (u) => `https://r.jina.ai/http://${u.replace(/^https?:\/\//, "")}`;
 
-async function timedFetch(url, opts = {}, retries = MAX_RETRIES) {
+async function timedFetch(url, opts = {}, retries = RETRIES) {
   for (let i = 0; ; i++) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), TIMEOUT);
@@ -36,7 +36,11 @@ async function timedFetch(url, opts = {}, retries = MAX_RETRIES) {
       const res = await fetch(url, {
         redirect: "follow",
         ...opts,
-        headers: { "User-Agent": UA, "Accept-Language": "fr,fr-FR;q=0.9,en;q=0.8", ...(opts.headers || {}) },
+        headers: {
+          "User-Agent": UA,
+          "Accept-Language": "fr,fr-FR;q=0.9,en;q=0.8",
+          ...(opts.headers || {}),
+        },
         signal: ctrl.signal,
       });
       clearTimeout(t);
@@ -63,14 +67,6 @@ function normalizeUrl(u) {
     return String(u || "").toLowerCase();
   }
 }
-function isPostUrl(u) {
-  try {
-    const p = new URL(u).pathname.toLowerCase();
-    return p.startsWith("/posts/") || p.includes("/feed/update/urn:li:activity:");
-  } catch {
-    return false;
-  }
-}
 function yaml(frontmatter) {
   const esc = (v) => String(v).replace(/"/g, '\\"');
   return (
@@ -84,8 +80,26 @@ function yaml(frontmatter) {
   );
 }
 
+// Regex élargie : http/https, sous-domaine éventuel, posts + plusieurs types d'URN
+const LI_POST_RE =
+  /(https?:\/\/(?:[a-z]+\.)?linkedin\.com\/(?:posts\/[^\s"')<>]+|feed\/update\/urn:li:(?:activity|ugcPost|share):[0-9A-Za-z_-]+))/gi;
+
+function isLikelyPost(u) {
+  try {
+    const p = new URL(u).pathname.toLowerCase();
+    return (
+      p.startsWith("/posts/") ||
+      p.includes("/feed/update/urn:li:activity:") ||
+      p.includes("/feed/update/urn:li:ugcpost:") ||
+      p.includes("/feed/update/urn:li:share:")
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Lecture OG via proxy (LinkedIn bloque en direct)
 async function fetchOgMetaLinkedIn(url) {
-  // Toujours via proxy (LinkedIn bloque autrement)
   const proxied = JINA(url);
   try {
     const res = await timedFetch(proxied, { headers: { Accept: "text/html" } });
@@ -118,36 +132,49 @@ async function fetchOgMetaLinkedIn(url) {
 
 async function collectFromBing() {
   const links = new Set();
-
-  for (const q of BING_QUERIES) {
-    // Paginer largement : first=1,11,21,...,201 (~20 pages) pour maximiser la couverture
-    for (let first = 1; first <= 201; first += 10) {
-      const url = JINA(BING(q, first));
+  for (const q of QUERY_VARIANTS) {
+    for (let first = 1; first <= 201; first += 50) {
+      const url = JINA(BING_Q(q, first));
       try {
         const res = await timedFetch(url, { headers: { Accept: "text/plain" } });
         if (!res.ok) {
-          console.error(`[LI] SERP ${res.status} first=${first} q=${q}`);
+          console.error(`[LI] Bing ${res.status} first=${first} q=${q}`);
           continue;
         }
         const text = await res.text();
-
-        for (const m of text.matchAll(
-          /https:\/\/www\.linkedin\.com\/posts\/[^\s")]+/g
-        )) {
-          const u = m[0].replace(/[\.,]$/, "");
-          if (isPostUrl(u)) links.add(u);
-        }
-        for (const m of text.matchAll(
-          /https:\/\/www\.linkedin\.com\/feed\/update\/urn:li:activity:[0-9A-Za-z_-]+/g
-        )) {
-          links.add(m[0]);
+        for (const m of text.matchAll(LI_POST_RE)) {
+          const u = m[1].replace(/[\.,]$/, "");
+          if (isLikelyPost(u)) links.add(u);
         }
       } catch (e) {
-        console.error("[LI] SERP error:", String(e).slice(0, 160));
+        console.error("[LI] Bing error:", String(e).slice(0, 160));
       }
     }
   }
+  return [...links];
+}
 
+async function collectFromDuckDuckGo() {
+  const links = new Set();
+  for (const q of QUERY_VARIANTS) {
+    for (let s = 0; s <= 450; s += 50) {
+      const url = JINA(DDG_Q(q, s));
+      try {
+        const res = await timedFetch(url, { headers: { Accept: "text/plain" } });
+        if (!res.ok) {
+          console.error(`[LI] DDG ${res.status} s=${s} q=${q}`);
+          continue;
+        }
+        const text = await res.text();
+        for (const m of text.matchAll(LI_POST_RE)) {
+          const u = m[1].replace(/[\.,]$/, "");
+          if (isLikelyPost(u)) links.add(u);
+        }
+      } catch (e) {
+        console.error("[LI] DDG error:", String(e).slice(0, 160));
+      }
+    }
+  }
   return [...links];
 }
 
@@ -165,8 +192,7 @@ function readExisting() {
 
 function writeItem(link, meta) {
   ensureDir(OUT_DIR);
-  // Pas de date publique fiable → on timestamp à l’indexation
-  const d = new Date();
+  const d = new Date(); // pas de date publique fiable
   const yyyy = d.getUTCFullYear();
   const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(d.getUTCDate()).padStart(2, "0");
@@ -184,7 +210,7 @@ function writeItem(link, meta) {
       month: "long",
       day: "numeric",
     }),
-    summary: meta.desc || meta.title || "",
+    summary: meta.desc || meta.title || "Publication LinkedIn",
     sourceUrl: link,
     permalink: `/li-clearecondl/${base}`,
     tags: ["LinkedIn", "CleaReconDL"],
@@ -204,24 +230,34 @@ async function main() {
   ensureDir(OUT_DIR);
   const existing = readExisting();
 
-  const rawLinks = await collectFromBing();
-  console.log(`[LI] SERP liens bruts: ${rawLinks.length}`);
+  // 1) Collecte multi-moteurs
+  const [bingLinks, ddgLinks] = await Promise.all([
+    collectFromBing(),
+    collectFromDuckDuckGo(),
+  ]);
+  const all = [...new Set([...bingLinks, ...ddgLinks])];
+  console.log(`[LI] SERP total uniques: ${all.length} (Bing:${bingLinks.length} / DDG:${ddgLinks.length})`);
 
-  if (!rawLinks.length) {
-    console.log("[LI] Aucun lien trouvé via SERP.");
+  if (!all.length) {
+    console.log("[LI] Aucun lien trouvé via SERP. Vérifie que la page importe bien '../content/li-clearecondl/*.md'.");
     return;
   }
 
+  // 2) Dédup global + enrichissement (sans filtrage OG strict)
   const seen = new Set();
   let created = 0;
-
-  for (const link of rawLinks) {
+  for (const link of all) {
     const key = normalizeUrl(link);
     if (seen.has(key) || existing.has(key)) continue;
     seen.add(key);
 
-    // On tente d'enrichir (mais on n'exclut pas si méta vide)
-    const meta = await fetchOgMetaLinkedIn(link);
+    let meta = { title: "", desc: "", image: null };
+    try {
+      meta = await fetchOgMetaLinkedIn(link);
+    } catch (e) {
+      // silencieux, on garde quand même
+    }
+
     writeItem(link, meta);
     created++;
   }
