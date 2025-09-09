@@ -2,7 +2,7 @@
 /**
  * Page d’accueil : actus (colonne principale) + CleaReconDL (colonne gauche).
  * - Import des contenus Markdown générés par les scripts.
- * - Colonne gauche = tout ce qu’on trouve (pas de filtre "aujourd'hui").
+ * - Colonne gauche = tout l'historique, avec dédoublonnage par URL finale.
  */
 
 const modules = import.meta.glob('/src/content/papers/*.md', { eager: true });
@@ -13,16 +13,15 @@ const clRaw = {
   ...import.meta.glob('/src/content/cleareconDL/*.md', { eager: true }),
 };
 
-const posts = Object.values(modules)
-  .map((m) => (m as any).frontmatter)
-  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
-  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-const leftPosts = Object.values(clRaw)
-  .map((m) => (m as any).frontmatter)
-  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
-  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()); // pas de slice ici
-
+/* --------- Helpers --------- */
+function normalizeUrl(u: string) {
+  try {
+    const x = new URL(u);
+    return (x.origin + x.pathname).replace(/\/+$/, '').toLowerCase();
+  } catch {
+    return (u || '').toLowerCase();
+  }
+}
 function hostOf(url: string) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
 }
@@ -46,6 +45,26 @@ function truncate(s: string, n = 160) {
   const x = (s || '').trim();
   return x.length > n ? x.slice(0, n - 1) + '…' : x;
 }
+
+/* --------- Données --------- */
+const posts = Object.values(modules)
+  .map((m) => (m as any).frontmatter)
+  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
+  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+// Colonne gauche : fusion des deux dossiers + tri + DÉDOUBLONNAGE par sourceUrl normalisée
+const leftPostsAll = Object.values(clRaw)
+  .map((m) => (m as any).frontmatter)
+  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
+  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+const seenLeft = new Set<string>();
+const leftPosts = leftPostsAll.filter((p: any) => {
+  const key = normalizeUrl(p.sourceUrl);
+  if (seenLeft.has(key)) return false;
+  seenLeft.add(key);
+  return true;
+});
 ---
 <html lang="fr">
   <head>
@@ -177,4 +196,3 @@ function truncate(s: string, n = 160) {
     </div>
   </body>
 </html>
-
