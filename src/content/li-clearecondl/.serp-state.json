@@ -1,5 +1,5 @@
 {
-  "source": "fallback",
+  "source": "yahoo-html",
   "bing": {
     "\"#cleareconDL\"": 0,
     "\"CleaRecon DL\"": 0,
@@ -11,14 +11,14 @@
     "\"CleaReconDL\"": 0
   },
   "google": {
-    "\"#cleareconDL\"": 0,
-    "\"CleaRecon DL\"": 0,
-    "\"CleaReconDL\"": 0
-  },
-  "yahoo": {
     "\"#cleareconDL\"": 1,
     "\"CleaRecon DL\"": 1,
     "\"CleaReconDL\"": 1
+  },
+  "yahoo": {
+    "\"#cleareconDL\"": 2,
+    "\"CleaRecon DL\"": 2,
+    "\"CleaReconDL\"": 2
   },
   "fallback": {
     "step": 1
