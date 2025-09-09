@@ -1,19 +1,22 @@
 ---
 /**
- * Page d’accueil : gauche(CleaReconDL) — centre(actus) — droite(GEHC 2025).
+ * Accueil : gauche(CleaReconDL) — centre(actus) — droite1(GEHC 2025) — droite2(LinkedIn CleaReconDL)
  */
 
-// Principal (actus)
+/* Centre (actus) */
 const modules = import.meta.glob('../content/papers/*.md', { eager: true });
 
-// Colonne gauche : CleaReconDL (deux dossiers possibles, casse différente)
+/* Gauche : CleaReconDL (deux dossiers) */
 const clRaw = {
   ...import.meta.glob('../content/clearecondl/*.md', { eager: true }),
   ...import.meta.glob('../content/cleareconDL/*.md', { eager: true }),
 };
 
-// Colonne droite : GE HealthCare 2025 (généré par generate-gehealthcare-2025.js)
+/* Droite 1 : YouTube GE HealthCare 2025 */
 const gehcRaw = import.meta.glob('../content/gehc2025/*.md', { eager: true });
+
+/* Droite 2 : LinkedIn CleaReconDL */
+const liRaw = import.meta.glob('../content/li-clearecondl/*.md', { eager: true });
 
 /* Helpers */
 function normalizeUrl(u: string) {
@@ -33,12 +36,8 @@ const brandMap: Record<string, string> = {
   'linkedin.com': 'LinkedIn',
   'youtube.com': 'YouTube',
   'youtu.be': 'YouTube',
-  'reddit.com': 'Reddit',
 };
-function brandOf(url: string) {
-  const h = hostOf(url);
-  return brandMap[h] || h || 'Source';
-}
+function brandOf(url: string) { const h = hostOf(url); return brandMap[h] || h || 'Source'; }
 function faviconOf(url: string) {
   const h = hostOf(url);
   return h ? `https://www.google.com/s2/favicons?domain=${h}&sz=64` : '';
@@ -54,25 +53,24 @@ const posts = Object.values(modules)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-// gauche (dédoublonnage par URL)
 const leftAll = Object.values(clRaw)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
 const seenLeft = new Set<string>();
-const leftPosts = leftAll.filter((p: any) => {
-  const key = normalizeUrl(p.sourceUrl);
-  if (seenLeft.has(key)) return false;
-  seenLeft.add(key);
-  return true;
-});
+const leftPosts = leftAll.filter((p: any) => { const k=normalizeUrl(p.sourceUrl); if (seenLeft.has(k)) return false; seenLeft.add(k); return true; });
 
-// droite (GEHC 2025) — déjà filtré par l’année dans le générateur
 const gehcAll = Object.values(gehcRaw)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+const liAll = Object.values(liRaw)
+  .map((m) => (m as any).frontmatter)
+  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
+  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+const seenLI = new Set<string>();
+const liPosts = liAll.filter((p: any) => { const k=normalizeUrl(p.sourceUrl); if (seenLI.has(k)) return false; seenLI.add(k); return true; });
 ---
 <html lang="fr">
   <head>
@@ -80,69 +78,45 @@ const gehcAll = Object.values(gehcRaw)
     <title>Actualités — France</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
-      @media (max-width: 1100px) {
-        .layout { grid-template-columns: 1fr; }
-        .aside-left, .aside-right { position: static !important; }
+      @media (max-width: 1400px) {
+        .layout { grid-template-columns: 320px 1fr; }
+        .aside-left, .aside-right-1, .aside-right-2 { position: static !important; }
+        .stack-right { display: grid; grid-template-columns: 1fr; gap: 20px; }
+      }
+      @media (min-width: 1401px) {
+        .layout { grid-template-columns: 320px 1fr 360px 360px; }
+        .stack-right { display: contents; }
       }
     </style>
   </head>
   <body style="background:#D9D9D9; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; min-height:100vh;">
-    <div style="max-width: 1300px; margin: 0 auto; padding: 24px;">
+    <div style="max-width: 1600px; margin: 0 auto; padding: 24px;">
       <header>
         <h1 style="margin:0 0 8px 0;">Actualités — France</h1>
         <p style="opacity:.7;margin:0;">Une info du jour, en français.</p>
       </header>
 
-      <div class="layout" style="display:grid; grid-template-columns: 320px 1fr 360px; gap: 20px; align-items:start; margin-top:24px;">
+      <div class="layout" style="display:grid; gap: 20px; align-items:start; margin-top:24px;">
         <!-- Colonne gauche : CleaReconDL -->
         <aside class="aside-left" style="position:sticky; top:16px; align-self:start;">
           <section style="background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04);">
             <h2 style="margin:0 0 6px 0; font-size:18px;">En ce moment : <span style="white-space:nowrap;">CleaRecon&nbsp;DL</span></h2>
             <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{leftPosts.length} élément(s)</div>
-
             {
               leftPosts.length === 0
-                ? (
-                  <p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">
-                    Rien pour l’instant. Lance <code>npm run generate:clearecondl</code> puis rebuild.
-                  </p>
-                )
+                ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Rien pour l’instant.</p>)
                 : (
                   <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow:auto;">
                     {leftPosts.map((p: any) => (
                       <li>
-                        <a
-                          href={p.sourceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style="display:flex; gap:10px; text-decoration:none; color:inherit; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px;"
-                          aria-label={`Ouvrir : ${p.title}`}
-                        >
-                          {p.imageUrl ? (
-                            <img
-                              src={p.imageUrl}
-                              alt=""
-                              loading="lazy"
-                              width="64"
-                              height="64"
-                              style="flex:0 0 64px; width:64px; height:64px; object-fit:cover; border-radius:8px; background:#f6f6f6;"
-                            />
-                          ) : (
-                            <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6; display:flex; align-items:center; justify-content:center; font-size:12px; color:#777;">
-                              {hostOf(p.sourceUrl)}
-                            </div>
-                          )}
+                        <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" style="display:flex; gap:10px; text-decoration:none; color:inherit; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px;" aria-label={`Ouvrir : ${p.title}`}>
+                          {p.imageUrl
+                            ? <img src={p.imageUrl} alt="" loading="lazy" width="64" height="64" style="flex:0 0 64px; width:64px; height:64px; object-fit:cover; border-radius:8px; background:#f6f6f6;" />
+                            : <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6; display:flex; align-items:center; justify-content:center; font-size:12px; color:#777;">{hostOf(p.sourceUrl)}</div>}
                           <div style="min-width:0;">
-                            <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">
-                              {p.title}
-                            </div>
-                            <div style="opacity:.75; font-size:12px; margin-bottom:4px;">
-                              {new Date(p.date).toLocaleDateString('fr-FR')}
-                              {hostOf(p.sourceUrl) ? ` · ${brandOf(p.sourceUrl)}` : ''}
-                            </div>
-                            <div style="font-size:13px; opacity:.9;">
-                              {truncate(p.summary, 160)}
-                            </div>
+                            <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">{p.title}</div>
+                            <div style="opacity:.75; font-size:12px; margin-bottom:4px;">{new Date(p.date).toLocaleDateString('fr-FR')} · {brandOf(p.sourceUrl)}</div>
+                            <div style="font-size:13px; opacity:.9;">{truncate(p.summary, 160)}</div>
                           </div>
                         </a>
                       </li>
@@ -153,48 +127,20 @@ const gehcAll = Object.values(gehcRaw)
           </section>
         </aside>
 
-        <!-- Colonne principale : actus -->
+        <!-- Colonne centrale : actus -->
         {
           posts.length === 0
-            ? (
-              <p style="margin-top:6px; opacity:.8;">
-                Aucune actualité pour l’instant. Relance le workflow et recharge la page.
-              </p>
-            )
+            ? (<p style="margin-top:6px; opacity:.8;">Aucune actualité pour l’instant.</p>)
             : (
               <main style="display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(280px,1fr));">
                 {posts.map((p: any) => (
-                  <a
-                    href={p.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`Ouvrir l’article source : ${p.title}`}
-                    style="text-decoration:none; color:inherit; background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:16px; display:block; box-shadow:0 1px 2px rgba(0,0,0,.04);"
-                  >
-                    {p.imageUrl && (
-                      <img
-                        src={p.imageUrl}
-                        alt={p.title}
-                        loading="lazy"
-                        style="display:block; width:100%; height:auto; max-height:260px; object-fit:contain; background:#f6f6f6; border-radius:10px; margin-bottom:10px;"
-                      />
-                    )}
+                  <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" aria-label={`Ouvrir l’article source : ${p.title}`} style="text-decoration:none; color:inherit; background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:16px; display:block; box-shadow:0 1px 2px rgba(0,0,0,.04);">
+                    {p.imageUrl && (<img src={p.imageUrl} alt={p.title} loading="lazy" style="display:block; width:100%; height:auto; max-height:260px; object-fit:contain; background:#f6f6f6; border-radius:10px; margin-bottom:10px;" />)}
                     <h3 style="margin:0 0 6px 0; line-height:1.25;">{p.title}</h3>
-                    <div style="opacity:.7; font-size: 14px; margin-bottom:8px;">
-                      {new Date(p.date).toLocaleDateString('fr-FR')}
-                    </div>
+                    <div style="opacity:.7; font-size: 14px; margin-bottom:8px;">{new Date(p.date).toLocaleDateString('fr-FR')}</div>
                     <p style="margin-top:0; opacity:.9;">{p.summary}</p>
-
                     <div style="display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; opacity:.9;">
-                      {faviconOf(p.sourceUrl) && (
-                        <img
-                          src={faviconOf(p.sourceUrl)}
-                          alt=""
-                          width="16"
-                          height="16"
-                          style="border-radius:4px; flex:0 0 16px;"
-                        />
-                      )}
+                      {faviconOf(p.sourceUrl) && (<img src={faviconOf(p.sourceUrl)} alt="" width="16" height="16" style="border-radius:4px; flex:0 0 16px;" />)}
                       <span>{brandOf(p.sourceUrl)}</span>
                     </div>
                   </a>
@@ -203,61 +149,68 @@ const gehcAll = Object.values(gehcRaw)
             )
         }
 
-        <!-- Colonne droite : GE HealthCare (2025) -->
-        <aside class="aside-right" style="position:sticky; top:16px; align-self:start;">
-          <section style="background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04);">
-            <h2 style="margin:0 0 6px 0; font-size:18px;">GE HealthCare — vidéos 2025</h2>
-            <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{gehcAll.length} vidéo(s)</div>
+        <!-- Colonnes droites -->
+        <div class="stack-right">
+          <!-- Droite 1 : GE HealthCare 2025 -->
+          <aside class="aside-right-1" style="position:sticky; top:16px; align-self:start;">
+            <section style="background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04);">
+              <h2 style="margin:0 0 6px 0; font-size:18px;">GE HealthCare — vidéos 2025</h2>
+              <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{gehcAll.length} vidéo(s)</div>
+              {
+                gehcAll.length === 0
+                  ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Lance <code>npm run generate:gehc2025</code>.</p>)
+                  : (
+                    <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow:auto;">
+                      {gehcAll.map((v: any) => (
+                        <li>
+                          <a href={v.sourceUrl} target="_blank" rel="noopener noreferrer" style="display:flex; gap:10px; text-decoration:none; color:inherit; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px;" aria-label={`Ouvrir la vidéo : ${v.title}`}>
+                            {v.imageUrl
+                              ? <img src={v.imageUrl} alt="" loading="lazy" width="96" height="54" style="flex:0 0 96px; width:96px; height:54px; object-fit:cover; border-radius:6px; background:#f6f6f6;" />
+                              : <div style="flex:0 0 96px; width:96px; height:54px; border-radius:6px; background:#f6f6f6;"></div>}
+                            <div style="min-width:0;">
+                              <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">{v.title}</div>
+                              <div style="opacity:.75; font-size:12px; margin-bottom:4px;">{new Date(v.date).toLocaleDateString('fr-FR')} · YouTube</div>
+                              <div style="font-size:13px; opacity:.9;">{truncate(v.summary, 140)}</div>
+                            </div>
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+              }
+            </section>
+          </aside>
 
-            {
-              gehcAll.length === 0
-                ? (
-                  <p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">
-                    Lance <code>npm run generate:gehc2025</code> pour indexer les vidéos 2025.
-                  </p>
-                )
-                : (
-                  <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow:auto;">
-                    {gehcAll.map((v: any) => (
-                      <li>
-                        <a
-                          href={v.sourceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style="display:flex; gap:10px; text-decoration:none; color:inherit; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px;"
-                          aria-label={`Ouvrir la vidéo : ${v.title}`}
-                        >
-                          {v.imageUrl ? (
-                            <img
-                              src={v.imageUrl}
-                              alt=""
-                              loading="lazy"
-                              width="96"
-                              height="54"
-                              style="flex:0 0 96px; width:96px; height:54px; object-fit:cover; border-radius:6px; background:#f6f6f6;"
-                            />
-                          ) : (
-                            <div style="flex:0 0 96px; width:96px; height:54px; border-radius:6px; background:#f6f6f6;"></div>
-                          )}
-                          <div style="min-width:0;">
-                            <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">
-                              {v.title}
+          <!-- Droite 2 : LinkedIn CleaReconDL -->
+          <aside class="aside-right-2" style="position:sticky; top:16px; align-self:start;">
+            <section style="background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04);">
+              <h2 style="margin:0 0 6px 0; font-size:18px;">LinkedIn — CleaReconDL</h2>
+              <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{liPosts.length} post(s)</div>
+              {
+                liPosts.length === 0
+                  ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Lance <code>npm run generate:li-clearecondl</code>.</p>)
+                  : (
+                    <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow:auto;">
+                      {liPosts.map((p: any) => (
+                        <li>
+                          <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" style="display:flex; gap:10px; text-decoration:none; color:inherit; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px;" aria-label={`Ouvrir le post : ${p.title}`}>
+                            {p.imageUrl
+                              ? <img src={p.imageUrl} alt="" loading="lazy" width="64" height="64" style="flex:0 0 64px; width:64px; height:64px; object-fit:cover; border-radius:8px; background:#f6f6f6;" />
+                              : <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6; display:flex; align-items:center; justify-content:center; font-size:12px; color:#777;">LI</div>}
+                            <div style="min-width:0;">
+                              <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">{p.title}</div>
+                              <div style="opacity:.75; font-size:12px; margin-bottom:4px;">{new Date(p.date).toLocaleDateString('fr-FR')} · LinkedIn</div>
+                              <div style="font-size:13px; opacity:.9;">{truncate(p.summary, 140)}</div>
                             </div>
-                            <div style="opacity:.75; font-size:12px; margin-bottom:4px;">
-                              {new Date(v.date).toLocaleDateString('fr-FR')} · YouTube
-                            </div>
-                            <div style="font-size:13px; opacity:.9;">
-                              {truncate(v.summary, 140)}
-                            </div>
-                          </div>
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                )
-            }
-          </section>
-        </aside>
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+              }
+            </section>
+          </aside>
+        </div>
       </div>
 
       <footer style="opacity:.6; font-size:12px; margin-top:32px;">
