@@ -19,9 +19,12 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -30,7 +33,7 @@ jobs:
           cache: 'npm'
 
       - name: Install deps
-        run: npm install
+        run: npm ci
 
       # 👉 Génération des contenus (colonne principale + colonne gauche)
       - name: Generate news (papers)
@@ -38,17 +41,22 @@ jobs:
 
       - name: Generate CleaReconDL (left column)
         run: npm run generate:clearecondl
-        env:
-          # Optionnel si tu utilises RSSHub/chaînes YouTube :
-          RSSHUB_BASE: ${{ vars.RSSHUB_BASE }}                # ex: https://rsshub.example.com
-          LINKEDIN_COMPANY_IDS: ${{ vars.LINKEDIN_COMPANY_IDS }}  # ex: "1337,2414183"
-          YT_CHANNEL_IDS: ${{ vars.YT_CHANNEL_IDS }}              # ex: "UCxxxx,UCyyyy"
+        # Si tu utilises des options via variables, dé-commente et renseigne-les :
+        # env:
+        #   RSSHUB_BASE: ${{ vars.RSSHUB_BASE }}                  # ex: https://rsshub.example.com
+        #   LINKEDIN_COMPANY_IDS: ${{ vars.LINKEDIN_COMPANY_IDS }}# ex: "1337,2414183"
+        #   YT_CHANNEL_IDS: ${{ vars.YT_CHANNEL_IDS }}            # ex: "UCxxxx,UCyyyy"
 
-      # (Optionnel) petit diagnostic pour vérifier que des fichiers ont bien été générés
+      # (Optionnel) Diagnostic : vérifie que des fichiers ont été générés
       - name: Debug counts
         run: |
-          echo "papers:" $(ls -1 src/content/papers 2>/dev/null | wc -l || true)
-          echo "clearecondl:" $(ls -1 src/content/clearecondl 2>/dev/null | wc -l || true)
+          echo "papers:        " $(ls -1 src/content/papers 2>/dev/null | wc -l || true)
+          echo "clearecondl:   " $(ls -1 src/content/clearecondl 2>/dev/null | wc -l || true)
+          echo "cleareconDL:   " $(ls -1 src/content/cleareconDL 2>/dev/null | wc -l || true)
+          echo "Recent files (clearecondl):"
+          ls -lt src/content/clearecondl 2>/dev/null | head -n 10 || true
+          echo "Recent files (cleareconDL):"
+          ls -lt src/content/cleareconDL 2>/dev/null | head -n 10 || true
 
       - name: Commit generated content back to repo
         run: |
