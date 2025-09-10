@@ -16,9 +16,9 @@
     "\"CleaReconDL\"": 1
   },
   "yahoo": {
-    "\"#cleareconDL\"": 0,
-    "\"CleaRecon DL\"": 0,
-    "\"CleaReconDL\"": 0
+    "\"#cleareconDL\"": 1,
+    "\"CleaRecon DL\"": 1,
+    "\"CleaReconDL\"": 1
   },
   "fallback": {
     "step": 5
