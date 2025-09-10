@@ -53,7 +53,7 @@ const posts = Object.values(modules)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-/* Gauche — CleaReconDL fusion + dédoublonnage par URL normalisée */
+/* Gauche — CleaReconDL fusion + dédoublonnage */
 const leftAll = Object.values(clRaw)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
