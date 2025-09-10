@@ -1,16 +1,16 @@
 ---
 title: "Post LinkedIn"
-date: "2025-09-10T08:52:34.268Z"
+date: "2025-09-10T10:43:10.743Z"
 publishedDate: "10 septembre 2025"
 summary: "Post LinkedIn"
-sourceUrl: "https://www.linkedin.com/posts/medicaldevice-network_medicaldevice-medtech-medicalimaging-activity-7270036964911816704-7Kip"
+sourceUrl: "https://www.linkedin.com/posts/revnacomertpay_aiinhealthcare-medicaldiagnostics-precisionmedicine-activity-7178041227458560002-xwY2"
 permalink: "/li-clearecondl/2025-09-10-post-linkedin"
-tags: ["LinkedIn", "CleaReconDL"]
-imageUrl: "https://unavatar.io/linkedin/medicaldevicenetwork_medicaldevice"
-imageCredit: "Image — https://www.linkedin.com/posts/medicaldevice-network_medicaldevice-medtech-medicalimaging-activity-7270036964911816704-7Kip"
+tags: ["LinkedIn", "CleaReconDL", "2025"]
+imageUrl: "https://unavatar.io/linkedin/revnacomertpay_aiinhealthcaremedicaldiagnostics"
+imageCredit: "Image — https://www.linkedin.com/posts/revnacomertpay_aiinhealthcare-medicaldiagnostics-precisionmedicine-activity-7178041227458560002-xwY2"
 ---
 
-![Post LinkedIn](https://unavatar.io/linkedin/medicaldevicenetwork_medicaldevice)
+![Post LinkedIn](https://unavatar.io/linkedin/revnacomertpay_aiinhealthcaremedicaldiagnostics)
 
 ## Résumé
 
@@ -18,4 +18,4 @@ Post LinkedIn
 
 ## Lien
 
-https://www.linkedin.com/posts/medicaldevice-network_medicaldevice-medtech-medicalimaging-activity-7270036964911816704-7Kip
+https://www.linkedin.com/posts/revnacomertpay_aiinhealthcare-medicaldiagnostics-precisionmedicine-activity-7178041227458560002-xwY2
