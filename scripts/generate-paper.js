@@ -23,14 +23,12 @@ const OPENVERSE_PAGE_SIZE = 12;
    - YouTube: format RSS officiel fourni (remplace CHANNEL_ID).
 */
 const FEEDS = [
-  /* MédTech général & analyses */
-  { name: "MedTech Intelligence", url: "https://medtechintelligence.com/feed/" },            // flux principal (WordPress)
-  { name: "Fierce Healthcare — Health Tech", url: "https://www.fiercehealthcare.com/rss/health-tech" }, // rub. Health Tech (majeure pour medtech)
-  { name: "MedTech Dive (news)", url: "https://www.medtechdive.com/feeds/news/" },           // flux global Industry Dive (souvent /feeds/news/)
-
+  
   /* Développement & recherche */
   // Journal of Medical Devices (ASME) — RSS de numéro courant
   { name: "ASME — Journal of Medical Devices (current)", url: "https://asmedigitalcollection.asme.org/medicaldevices/rss/current" },
+  // JSCAI (Elsevier/ScienceDirect) — flux journal (ISSN 2772-9303)
+  { name: "JSCAI — Journal of the Society for Cardiovascular Angiography & Interventions", url: "https://rss.sciencedirect.com/publication/science/2772-9303" }, // ScienceDirect RSS
 
   /* Radiologie interventionnelle */
   // SIR (news / IR Quarterly). Le site IR Quarterly est sous WordPress → /feed/
@@ -39,10 +37,15 @@ const FEEDS = [
   /* Neuro-intervention */
   { name: "Journal of NeuroInterventional Surgery — Current", url: "https://jnis.bmj.com/rss/current.xml" },
 
-  /* Études cliniques (personnaliser l’URL) */
-  // Exemple générique à remplacer par l’URL RSS de TA recherche (cf. doc ClinicalTrials.gov)
-  { name: "ClinicalTrials.gov — ta recherche", url: "https://clinicaltrials.gov/ct2/results/rss.xml?term=interventional%20radiology&recrs=&cntry=&state=&city=&dist=" },
-   
+  /* News spécialisées (BIBA Medical) — WordPress → /feed/ */
+  { name: "Vascular News — Latest", url: "https://vascularnews.com/feed/" },                 // flux principal
+  { name: "Cardiovascular News — Latest", url: "https://cardiovascularnews.com/feed/" },     // flux principal
+  { name: "Interventional News — Latest", url: "https://interventionalnews.com/feed/" },     // flux principal
+  // (optionnel) flux catégorie "Latest News" si tu veux restreindre :
+  // { name: "Vascular News — Latest News", url: "https://vascularnews.com/category/latest-news/feed/" },
+  // { name: "Cardiovascular News — Latest News", url: "https://cardiovascularnews.com/category/latest-news/feed/" },
+  // { name: "Interventional News — Latest News", url: "https://interventionalnews.com/latest-news/feed/" },
+
   /* Acteurs industriels (ex. Medtronic) — flux officiels par portefeuille */
   { name: "Medtronic — Press releases (All)",    url: "https://news.medtronic.com/rss?rsspage=20295" },
   { name: "Medtronic — Cardiovascular",          url: "https://news.medtronic.com/rss?rsspage=20299" },
@@ -53,12 +56,7 @@ const FEEDS = [
   /* Technologie interventionnelle (NIBIB) */
   { name: "NIBIB — News",   url: "https://www.nibib.nih.gov/news-events/rss.xml" },
   { name: "NIBIB — Events", url: "https://www.nibib.nih.gov/news-events/events/rss.xml" },
-
-  /* YouTube (remplacer CHANNEL_ID) */
-  { name: "YouTube — NIBIB", url: "https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID" },
-  { name: "YouTube — Medtronic", url: "https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID" },
 ];
-
 
 /* ---- Utils ---- */
 function yaml(frontmatter) {
