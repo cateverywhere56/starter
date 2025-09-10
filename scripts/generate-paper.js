@@ -15,36 +15,22 @@ import matter from "gray-matter";
 const ITEMS_PER_RUN = 1;
 const OPENVERSE_PAGE_SIZE = 12;
 
-/* ---- FEEDS MedTech ----
-   NB:
-   - Certains éditeurs proposent plusieurs flux (news, events, par rubrique). J’ai choisi les plus « newsy ».
-   - ClinicalTrials.gov: mets ici le flux de TA recherche sauvegardée (voir liens plus bas).
-   - LinkedIn: pas d’RSS officiel → voir notes plus bas.
-   - YouTube: format RSS officiel fourni (remplace CHANNEL_ID).
-*/
 const FEEDS = [
-  
   /* Développement & recherche */
-  // Journal of Medical Devices (ASME) — RSS de numéro courant
   { name: "ASME — Journal of Medical Devices (current)", url: "https://asmedigitalcollection.asme.org/medicaldevices/rss/current" },
   // JSCAI (Elsevier/ScienceDirect) — flux journal (ISSN 2772-9303)
-  { name: "JSCAI — Journal of the Society for Cardiovascular Angiography & Interventions", url: "https://rss.sciencedirect.com/publication/science/2772-9303" }, // ScienceDirect RSS
+  { name: "JSCAI — Journal of the Society for Cardiovascular Angiography & Interventions", url: "https://rss.sciencedirect.com/publication/science/2772-9303" },
 
   /* Radiologie interventionnelle */
-  // SIR (news / IR Quarterly). Le site IR Quarterly est sous WordPress → /feed/
   { name: "SIR — IR Quarterly (news/podcast)", url: "https://irq.sirweb.org/feed/" },
 
   /* Neuro-intervention */
   { name: "Journal of NeuroInterventional Surgery — Current", url: "https://jnis.bmj.com/rss/current.xml" },
 
-  /* News spécialisées (BIBA Medical) — WordPress → /feed/ */
-  { name: "Vascular News — Latest", url: "https://vascularnews.com/feed/" },                 // flux principal
-  { name: "Cardiovascular News — Latest", url: "https://cardiovascularnews.com/feed/" },     // flux principal
-  { name: "Interventional News — Latest", url: "https://interventionalnews.com/feed/" },     // flux principal
-  // (optionnel) flux catégorie "Latest News" si tu veux restreindre :
-  // { name: "Vascular News — Latest News", url: "https://vascularnews.com/category/latest-news/feed/" },
-  // { name: "Cardiovascular News — Latest News", url: "https://cardiovascularnews.com/category/latest-news/feed/" },
-  // { name: "Interventional News — Latest News", url: "https://interventionalnews.com/latest-news/feed/" },
+  /* News spécialisées (BIBA Medical) */
+  { name: "Vascular News — Latest", url: "https://vascularnews.com/feed/" },
+  { name: "Cardiovascular News — Latest", url: "https://cardiovascularnews.com/feed/" },
+  { name: "Interventional News — Latest", url: "https://interventionalnews.com/feed/" },
 
   /* Acteurs industriels (ex. Medtronic) — flux officiels par portefeuille */
   { name: "Medtronic — Press releases (All)",    url: "https://news.medtronic.com/rss?rsspage=20295" },
@@ -56,6 +42,28 @@ const FEEDS = [
   /* Technologie interventionnelle (NIBIB) */
   { name: "NIBIB — News",   url: "https://www.nibib.nih.gov/news-events/rss.xml" },
   { name: "NIBIB — Events", url: "https://www.nibib.nih.gov/news-events/events/rss.xml" },
+
+  /* === AJOUTS demandés === */
+
+  // 1) Stroke & Vascular Neurology (BMJ) — flux officiel
+  { name: "SVN (BMJ) — Recent issues", url: "https://svn.bmj.com/rss/recent.xml" },
+
+  // 2) EuroIntervention (PCR) — pas de flux RSS public détecté
+  // 👉 Alternative: s’inscrire à la newsletter EuroIntervention / PCR
+  //    ou surveiller les pages “Issues” via un watcher (distill.io, etc.)
+  // { name: "EuroIntervention — Latest (no RSS)", url: "https://eurointervention.pcronline.com/" },
+
+  // 3) ScienceDirect — s’abonner par journal / recherche
+  //    Exemple (interventionnel): JACC: Cardiovascular Interventions
+  { name: "JACC: Cardiovascular Interventions (ScienceDirect)", url: "https://rss.sciencedirect.com/publication/science/19368798" },
+  //    Modèle générique ScienceDirect:
+  //    https://rss.sciencedirect.com/publication/science/<ISSN_ou_ID_journal>
+
+  // 4) PubMed Central (PMC) — flux “news/updates” + préférer des flux par recherche PubMed (RSS)
+  //    News PMC (via NCBI Insights, catégorie PMC)
+  { name: "PMC — News & updates", url: "https://ncbiinsights.ncbi.nlm.nih.gov/tag/pmc/feed/" },
+  //    Pour du contenu scientifique ciblé, crée un RSS via PubMed (Saved Search → Create RSS)
+  //    Exemple (interventional cardiology): https://pubmed.ncbi.nlm.nih.gov/?term=interventional+cardiology&filter=datesearch.y_5&size=50  -> Create RSS
 ];
 
 /* ---- Utils ---- */
