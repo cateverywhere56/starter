@@ -1,16 +1,16 @@
 ---
 title: "Post LinkedIn"
-date: "2025-09-10T21:50:21.649Z"
+date: "2025-09-10T22:39:06.913Z"
 publishedDate: "10 septembre 2025"
 summary: "Post LinkedIn"
-sourceUrl: "https://pe.linkedin.com/posts/altentechnologyusa_newsroom-ge-healthcare-activity-7342989804076179456-9ahX"
+sourceUrl: "https://www.linkedin.com/posts/eleonora-viviani-b27771163_aiinhealthcare-innovation-interventionalradiology-activity-7330176416426123264-pWYz"
 permalink: "/li-clearecondl/2025-09-10-post-linkedin"
 tags: ["LinkedIn", "CleaReconDL", "2025"]
-imageUrl: "https://unavatar.io/linkedin/altentechnologyusa_newsroomge"
-imageCredit: "Image — https://pe.linkedin.com/posts/altentechnologyusa_newsroom-ge-healthcare-activity-7342989804076179456-9ahX"
+imageUrl: "https://unavatar.io/linkedin/eleonoraviviani"
+imageCredit: "Image — https://www.linkedin.com/posts/eleonora-viviani-b27771163_aiinhealthcare-innovation-interventionalradiology-activity-7330176416426123264-pWYz"
 ---
 
-![Post LinkedIn](https://unavatar.io/linkedin/altentechnologyusa_newsroomge)
+![Post LinkedIn](https://unavatar.io/linkedin/eleonoraviviani)
 
 ## Résumé
 
@@ -18,4 +18,4 @@ Post LinkedIn
 
 ## Lien
 
-https://pe.linkedin.com/posts/altentechnologyusa_newsroom-ge-healthcare-activity-7342989804076179456-9ahX
+https://www.linkedin.com/posts/eleonora-viviani-b27771163_aiinhealthcare-innovation-interventionalradiology-activity-7330176416426123264-pWYz
