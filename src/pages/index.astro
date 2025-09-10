@@ -1,12 +1,12 @@
 ---
 /**
- * Accueil : gauche(CleaReconDL) — centre(actus) — droite1(GEHC 2025) — droite2(LinkedIn CleaReconDL)
+ * Accueil : gauche(CleaReconDL) — centre(actus) — droite1(GEHC 2025) — droite2(LinkedIn CleaReconDL) — droite3(Twitter 30j)
  */
 
 /* Centre (actus) */
 const modules = import.meta.glob('../content/papers/*.md', { eager: true });
 
-/* Gauche : CleaReconDL (deux dossiers) */
+/* Gauche : CleaReconDL (deux dossiers pour tolérer la casse du dossier) */
 const clRaw = {
   ...import.meta.glob('../content/clearecondl/*.md', { eager: true }),
   ...import.meta.glob('../content/cleareconDL/*.md', { eager: true }),
@@ -17,6 +17,9 @@ const gehcRaw = import.meta.glob('../content/gehc2025/*.md', { eager: true });
 
 /* Droite 2 : LinkedIn CleaReconDL */
 const liRaw = import.meta.glob('../content/li-clearecondl/*.md', { eager: true });
+
+/* Droite 3 : Twitter — 30 derniers jours */
+const twRaw = import.meta.glob('../content/tweets-clearecondl/*.md', { eager: true });
 
 /* Helpers */
 function normalizeUrl(u: string) {
@@ -36,6 +39,8 @@ const brandMap: Record<string, string> = {
   'linkedin.com': 'LinkedIn',
   'youtube.com': 'YouTube',
   'youtu.be': 'YouTube',
+  'twitter.com': 'Twitter',
+  'x.com': 'Twitter',
 };
 function brandOf(url: string) { const h = hostOf(url); return brandMap[h] || h || 'Source'; }
 function faviconOf(url: string) {
@@ -47,30 +52,39 @@ function truncate(s: string, n = 160) {
   return x.length > n ? x.slice(0, n - 1) + '…' : x;
 }
 
-/* Données */
+/* Données — centre */
 const posts = Object.values(modules)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+/* Gauche — CleaReconDL fusion + dédoublonnage par URL normalisée */
 const leftAll = Object.values(clRaw)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 const seenLeft = new Set<string>();
-const leftPosts = leftAll.filter((p: any) => { const k=normalizeUrl(p.sourceUrl); if (seenLeft.has(k)) return false; seenLeft.add(k); return true; });
+const leftPosts = leftAll.filter((p: any) => { const k = normalizeUrl(p.sourceUrl); if (seenLeft.has(k)) return false; seenLeft.add(k); return true; });
 
+/* Droite 1 — YouTube 2025 */
 const gehcAll = Object.values(gehcRaw)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+/* Droite 2 — LinkedIn CleaReconDL (dédoublonné) */
 const liAll = Object.values(liRaw)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 const seenLI = new Set<string>();
-const liPosts = liAll.filter((p: any) => { const k=normalizeUrl(p.sourceUrl); if (seenLI.has(k)) return false; seenLI.add(k); return true; });
+const liPosts = liAll.filter((p: any) => { const k = normalizeUrl(p.sourceUrl); if (seenLI.has(k)) return false; seenLI.add(k); return true; });
+
+/* Droite 3 — Twitter 30 jours */
+const twAll = Object.values(twRaw)
+  .map((m) => (m as any).frontmatter)
+  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
+  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 ---
 <html lang="fr">
   <head>
@@ -78,38 +92,57 @@ const liPosts = liAll.filter((p: any) => { const k=normalizeUrl(p.sourceUrl); if
     <title>Actualités — France</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
+      :root { --gap: 20px; }
       @media (max-width: 1400px) {
         .layout { grid-template-columns: 320px 1fr; }
-        .aside-left, .aside-right-1, .aside-right-2 { position: static !important; }
-        .stack-right { display: grid; grid-template-columns: 1fr; gap: 20px; }
+        .aside-left, .aside-right-1, .aside-right-2, .aside-right-3 { position: static !important; }
+        .stack-right { display: grid; grid-template-columns: 1fr; gap: var(--gap); }
       }
-      @media (min-width: 1401px) {
-        .layout { grid-template-columns: 320px 1fr 360px 360px; }
+      @media (min-width: 1401px) and (max-width: 1799px) {
+        .layout { grid-template-columns: 320px 1fr 360px; }
         .stack-right { display: contents; }
+        /* Sur cette largeur, on empile LinkedIn + Twitter sous YouTube dans la même colonne */
+        .aside-right-2, .aside-right-3 { grid-column: 3; }
+      }
+      @media (min-width: 1800px) {
+        .layout { grid-template-columns: 320px 1fr 360px 360px 360px; }
+        .stack-right { display: contents; }
+      }
+      .card {
+        background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:14px;
+        box-shadow:0 1px 2px rgba(0,0,0,.04);
+      }
+      .list-vert {
+        list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px;
+        max-height:70vh; overflow:auto;
+      }
+      .item {
+        display:flex; gap:10px; text-decoration:none; color:inherit;
+        background:#fff; border:1px solid #eee; border-radius:10px; padding:10px;
       }
     </style>
   </head>
   <body style="background:#D9D9D9; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; min-height:100vh;">
-    <div style="max-width: 1600px; margin: 0 auto; padding: 24px;">
+    <div style="max-width: 1700px; margin: 0 auto; padding: 24px;">
       <header>
         <h1 style="margin:0 0 8px 0;">Actualités — France</h1>
         <p style="opacity:.7;margin:0;">Une info du jour, en français.</p>
       </header>
 
-      <div class="layout" style="display:grid; gap: 20px; align-items:start; margin-top:24px;">
+      <div class="layout" style="display:grid; gap: var(--gap); align-items:start; margin-top:24px;">
         <!-- Colonne gauche : CleaReconDL -->
         <aside class="aside-left" style="position:sticky; top:16px; align-self:start;">
-          <section style="background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04);">
+          <section class="card">
             <h2 style="margin:0 0 6px 0; font-size:18px;">En ce moment : <span style="white-space:nowrap;">CleaRecon&nbsp;DL</span></h2>
             <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{leftPosts.length} élément(s)</div>
             {
               leftPosts.length === 0
                 ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Rien pour l’instant.</p>)
                 : (
-                  <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow:auto;">
+                  <ul class="list-vert">
                     {leftPosts.map((p: any) => (
                       <li>
-                        <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" style="display:flex; gap:10px; text-decoration:none; color:inherit; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px;" aria-label={`Ouvrir : ${p.title}`}>
+                        <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" class="item" aria-label={`Ouvrir : ${p.title}`}>
                           {p.imageUrl
                             ? <img src={p.imageUrl} alt="" loading="lazy" width="64" height="64" style="flex:0 0 64px; width:64px; height:64px; object-fit:cover; border-radius:8px; background:#f6f6f6;" />
                             : <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6; display:flex; align-items:center; justify-content:center; font-size:12px; color:#777;">{hostOf(p.sourceUrl)}</div>}
@@ -151,19 +184,19 @@ const liPosts = liAll.filter((p: any) => { const k=normalizeUrl(p.sourceUrl); if
 
         <!-- Colonnes droites -->
         <div class="stack-right">
-          <!-- Droite 1 : GE HealthCare 2025 -->
+          <!-- Droite 1 : GE HealthCare 2025 (YouTube) -->
           <aside class="aside-right-1" style="position:sticky; top:16px; align-self:start;">
-            <section style="background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04);">
+            <section class="card">
               <h2 style="margin:0 0 6px 0; font-size:18px;">GE HealthCare — vidéos 2025</h2>
               <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{gehcAll.length} vidéo(s)</div>
               {
                 gehcAll.length === 0
-                  ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Lance <code>npm run generate:gehc2025</code>.</p>)
+                  ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Aucune vidéo indexée.</p>)
                   : (
-                    <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow:auto;">
+                    <ul class="list-vert">
                       {gehcAll.map((v: any) => (
                         <li>
-                          <a href={v.sourceUrl} target="_blank" rel="noopener noreferrer" style="display:flex; gap:10px; text-decoration:none; color:inherit; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px;" aria-label={`Ouvrir la vidéo : ${v.title}`}>
+                          <a href={v.sourceUrl} target="_blank" rel="noopener noreferrer" class="item" aria-label={`Ouvrir la vidéo : ${v.title}`}>
                             {v.imageUrl
                               ? <img src={v.imageUrl} alt="" loading="lazy" width="96" height="54" style="flex:0 0 96px; width:96px; height:54px; object-fit:cover; border-radius:6px; background:#f6f6f6;" />
                               : <div style="flex:0 0 96px; width:96px; height:54px; border-radius:6px; background:#f6f6f6;"></div>}
@@ -183,17 +216,17 @@ const liPosts = liAll.filter((p: any) => { const k=normalizeUrl(p.sourceUrl); if
 
           <!-- Droite 2 : LinkedIn CleaReconDL -->
           <aside class="aside-right-2" style="position:sticky; top:16px; align-self:start;">
-            <section style="background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04);">
+            <section class="card">
               <h2 style="margin:0 0 6px 0; font-size:18px;">LinkedIn — CleaReconDL</h2>
               <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{liPosts.length} post(s)</div>
               {
                 liPosts.length === 0
-                  ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Lance <code>npm run generate:li-clearecondl</code>.</p>)
+                  ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Aucun post LinkedIn pour l’instant.</p>)
                   : (
-                    <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow:auto;">
+                    <ul class="list-vert">
                       {liPosts.map((p: any) => (
                         <li>
-                          <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" style="display:flex; gap:10px; text-decoration:none; color:inherit; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px;" aria-label={`Ouvrir le post : ${p.title}`}>
+                          <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" class="item" aria-label={`Ouvrir le post : ${p.title}`}>
                             {p.imageUrl
                               ? <img src={p.imageUrl} alt="" loading="lazy" width="64" height="64" style="flex:0 0 64px; width:64px; height:64px; object-fit:cover; border-radius:8px; background:#f6f6f6;" />
                               : <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6; display:flex; align-items:center; justify-content:center; font-size:12px; color:#777;">LI</div>}
@@ -201,6 +234,36 @@ const liPosts = liAll.filter((p: any) => { const k=normalizeUrl(p.sourceUrl); if
                               <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">{p.title}</div>
                               <div style="opacity:.75; font-size:12px; margin-bottom:4px;">{new Date(p.date).toLocaleDateString('fr-FR')} · LinkedIn</div>
                               <div style="font-size:13px; opacity:.9;">{truncate(p.summary, 140)}</div>
+                            </div>
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+              }
+            </section>
+          </aside>
+
+          <!-- Droite 3 : Twitter (30 derniers jours) -->
+          <aside class="aside-right-3" style="position:sticky; top:16px; align-self:start;">
+            <section class="card">
+              <h2 style="margin:0 0 6px 0; font-size:18px;">Twitter — 30&nbsp;derniers&nbsp;jours</h2>
+              <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{twAll.length} tweet(s)</div>
+              {
+                twAll.length === 0
+                  ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Aucun tweet pour l’instant.</p>)
+                  : (
+                    <ul class="list-vert">
+                      {twAll.map((t: any) => (
+                        <li>
+                          <a href={t.sourceUrl} target="_blank" rel="noopener noreferrer" class="item" aria-label={`Ouvrir le tweet : ${t.title}`}>
+                            {t.imageUrl
+                              ? <img src={t.imageUrl} alt="" loading="lazy" width="64" height="64" style="flex:0 0 64px; width:64px; height:64px; object-fit:cover; border-radius:8px; background:#f6f6f6;" />
+                              : <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6;"></div>}
+                            <div style="min-width:0;">
+                              <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">{t.title}</div>
+                              <div style="opacity:.75; font-size:12px; margin-bottom:4px;">{new Date(t.date).toLocaleDateString('fr-FR')} · Twitter</div>
+                              <div style="font-size:13px; opacity:.9; overflow:hidden; text-overflow:ellipsis;">{truncate(t.summary, 140)}</div>
                             </div>
                           </a>
                         </li>
