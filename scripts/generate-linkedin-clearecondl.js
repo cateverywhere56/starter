@@ -1,7 +1,9 @@
 // scripts/generate-linkedin-clearecondl.js
-// v7 (no-API) — LinkedIn (30 derniers jours) : #cleareconDL | "CleaRecon DL" | "CleaReconDL"
-// Sources HTML via proxy r.jina.ai : Google (tbs=qdr:m), Bing (qft age-lt1month), Yahoo (age=1m), DuckDuckGo (df=m)
-// Écrit .md dans src/content/li-clearecondl avec vignette (image du post OU avatar du profil/page).
+// v7.4 (no-API, robuste) — LinkedIn (30 derniers jours si possible)
+// Moteurs HTML via r.jina.ai : Google (tbs=qdr:m), Bing (qft age-lt1month), Yahoo (age=1m), DuckDuckGo (df=m)
+// Si 0 résultat, fallback SANS filtre de temps (toujours filtré côté nôtre par pertinence).
+// On ne retient que les liens LinkedIn "post-like" ET dont (title+desc) contiennent "clearecon" (avec/sans espace) et/ou "clearecondl".
+// Image garantie : og:image / media.licdn.com sinon avatar (unavatar.io).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -18,12 +20,15 @@ const QUERY_VARIANTS = [
   '"#cleareconDL"',
   '"CleaRecon DL"',
   '"CleaReconDL"',
+  // variantes tolérantes pour augmenter le rappel
+  "clearecon dl",
+  "clearecondl",
+  "clearecon",
 ];
 
-// On reste raisonnable (anti-429) mais on balaie plusieurs pages
 const GOOGLE_STARTS = [0, 10, 20, 30, 40];
-const BING_FIRSTS   = [1, 51, 101, 151, 201];   // count=50
-const YAHOO_BS      = [1, 11, 21, 31, 41];      // 1-based
+const BING_FIRSTS   = [1, 51, 101, 151, 201];
+const YAHOO_BS      = [1, 11, 21, 31, 41];
 const DDG_STARTS    = [0, 50, 100, 150, 200];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -48,7 +53,6 @@ async function timedFetch(url, opts = {}, retries = RETRIES) {
   }
 }
 
-/* ---------- Utils ---------- */
 function ensureDir(d) { fs.mkdirSync(d, { recursive: true }); }
 function clean(s=""){ return String(s).replace(/\s+/g," ").trim(); }
 function normalizeUrl(u){ try{ const x=new URL(u); return (x.origin+x.pathname).replace(/\/+$/,"").toLowerCase(); } catch{ return String(u||"").toLowerCase(); } }
@@ -77,6 +81,13 @@ function isLikelyPost(u) {
   } catch { return false; }
 }
 
+/* ---------- Pertinence contenu ---------- */
+function looksRelevant(text="") {
+  const t = text.toLowerCase();
+  // tolère "clearecon dl", "clearecondl", "clearecon" simple
+  return /\bclearecon\s*dl\b/.test(t) || /\bclearecondl\b/.test(t) || /\bclearecon\b/.test(t);
+}
+
 /* ---------- Extraction image (post OU avatar) ---------- */
 function pick(re, html){ return html.match(re)?.[1] || ""; }
 function absolutize(u, base) { try { return new URL(u, base).href; } catch { return ""; } }
@@ -85,14 +96,11 @@ function linkedInHandleFromUrl(url) {
   try {
     const u = new URL(url);
     const seg = u.pathname.split("/").filter(Boolean);
-    // /company/<handle>/posts/...
     const ci = seg.indexOf("company");
     if (ci >= 0 && seg[ci+1]) return seg[ci+1];
-    // /in/<handle>/...
     const ii = seg.indexOf("in");
     if (ii >= 0 && seg[ii+1]) return seg[ii+1];
-    // /posts/<name-slug>... (souvent "prenom-nom-..."), tente
-    if (seg[0] === "posts" && seg[1]) return seg[1].split("-").slice(0,2).join(""); // best-effort
+    if (seg[0] === "posts" && seg[1]) return seg[1].split("-").slice(0,2).join("");
   } catch {}
   return null;
 }
@@ -124,6 +132,12 @@ async function fetchOgMetaLinkedIn(url) {
       pick(/<meta[^>]+property=["']og:description["'][^>]*content=["']([^"']+)["']/i, html) ||
       pick(/<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)["']/i, html) || ""
     );
+
+    // Filtre sémantique ici (évite les faux positifs des SERP)
+    if (!(looksRelevant(title) || looksRelevant(desc))) {
+      return { title:"", desc:"", image:"", irrelevant:true };
+    }
+
     const imgPost = extractLinkedInImage(html, url);
     if (imgPost) return { title, desc, image: imgPost };
     const handle = linkedInHandleFromUrl(url);
@@ -146,14 +160,13 @@ function readExisting(){
   }
   return set;
 }
-
 function writeItem(link, meta){
-  ensureDir(OUT_DIR);
-  const d=new Date(); // date d'indexation (SERP filtrées sur 30j)
+  const d=new Date(); // date d'indexation (SERP déjà ~30j)
   const yyyy=d.getUTCFullYear(), mm=String(d.getUTCMonth()+1).padStart(2,"0"), dd=String(d.getUTCDate()).padStart(2,"0");
   const base = `${yyyy}-${mm}-${dd}-${slugify(meta.title || "post", { lower:true, strict:true }).slice(0,80)}`;
   const file = path.join(OUT_DIR, `${base}.md`);
 
+  const imageFinal = meta.image || UNAVATAR_GENERIC(link);
   const fm = {
     title: meta.title || "Post LinkedIn",
     date: d.toISOString(),
@@ -162,49 +175,56 @@ function writeItem(link, meta){
     sourceUrl: link,
     permalink: `/li-clearecondl/${base}`,
     tags: ["LinkedIn", "CleaReconDL"],
-    imageUrl: meta.image || "",
-    imageCredit: meta.image ? `Image — ${link}` : "",
+    imageUrl: imageFinal,
+    imageCredit: imageFinal ? `Image — ${link}` : "",
   };
   const body = (fm.imageUrl ? `![${fm.title}](${fm.imageUrl})\n\n` : "") +
                `## Résumé\n\n${fm.summary}\n\n## Lien\n\n${link}\n`;
+  ensureDir(OUT_DIR);
   fs.writeFileSync(file, `---\n${yaml(fm)}---\n\n${body}`, "utf-8");
 }
 
 /* ---------- Collecteurs HTML (30 jours) ---------- */
 // Google (tbs=qdr:m)
-function GOOGLE_Q(q, start=0){
-  return `https://www.google.com/search?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&hl=fr&num=10&start=${start}&tbs=qdr:m`;
-}
-async function collectFromGoogle() {
-  const all = new Set();
+const GOOGLE_Q = (q, start=0) =>
+  `https://www.google.com/search?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&hl=fr&num=10&start=${start}&tbs=qdr:m`;
+// Google (fallback sans filtre)
+const GOOGLE_Q_ALL = (q, start=0) =>
+  `https://www.google.com/search?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&hl=fr&num=10&start=${start}`;
+
+async function collectGoogle({withTime=true}={}) {
+  const all = new Set(); let pages=0;
   for (const q of QUERY_VARIANTS) {
     for (const start of GOOGLE_STARTS) {
-      const url = JINA(GOOGLE_Q(q, start));
+      const url = JINA((withTime ? GOOGLE_Q : GOOGLE_Q_ALL)(q, start));
       try {
         const res = await timedFetch(url, { headers: { Accept: "text/plain" } });
         if (!res.ok) continue;
         const text = await res.text();
         for (const m of text.matchAll(LI_POST_RE)) all.add(m[1]);
-        // Redirections /url?q=
         for (const m of text.matchAll(/https?:\/\/www\.google\.[^/\s]+\/url\?q=([^&\s]+)/gi)) {
           try { const u = decodeURIComponent(m[1]); if (isLikelyPost(u)) all.add(u); } catch {}
         }
+        pages++;
       } catch {}
-      await sleep(200);
+      await sleep(180);
     }
   }
+  console.log(`[LI] Google ${withTime?'30j':'(no time)'} pages=${pages} → ${all.size} liens`);
   return [...all];
 }
 
-// Bing (qft=+filterui:age-lt1month)
-function BING_Q(q, first=1){
-  return `https://www.bing.com/search?q=${encodeURIComponent(`site:linkedin.com (${q})`)}&setlang=fr&count=50&first=${first}&qft=%2Bfilterui%3Aage-lt1month`;
-}
-async function collectFromBing() {
-  const all = new Set();
+// Bing (qft=+filterui:age-lt1month) / fallback sans qft
+const BING_Q = (q, first=1) =>
+  `https://www.bing.com/search?q=${encodeURIComponent(`site:linkedin.com (${q})`)}&setlang=fr&count=50&first=${first}&qft=%2Bfilterui%3Aage-lt1month`;
+const BING_Q_ALL = (q, first=1) =>
+  `https://www.bing.com/search?q=${encodeURIComponent(`site:linkedin.com (${q})`)}&setlang=fr&count=50&first=${first}`;
+
+async function collectBing({withTime=true}={}) {
+  const all = new Set(); let pages=0;
   for (const q of QUERY_VARIANTS) {
     for (const first of BING_FIRSTS) {
-      const url = JINA(BING_Q(q, first));
+      const url = JINA((withTime ? BING_Q : BING_Q_ALL)(q, first));
       try {
         const res = await timedFetch(url, { headers: { Accept: "text/plain" } });
         if (!res.ok) continue;
@@ -213,52 +233,62 @@ async function collectFromBing() {
         for (const m of text.matchAll(/https?:\/\/(?:[a-z]+\.)?linkedin\.com\/[^\s"'<>]+/gi)) {
           const u = m[0]; if (isLikelyPost(u)) all.add(u);
         }
+        pages++;
       } catch {}
-      await sleep(200);
+      await sleep(180);
     }
   }
+  console.log(`[LI] Bing ${withTime?'30j':'(no time)'} pages=${pages} → ${all.size} liens`);
   return [...all];
 }
 
-// Yahoo (fr2=time&age=1m)
-function YAHOO_Q(q, b=1){
-  return `https://search.yahoo.com/search?p=${encodeURIComponent(`site:linkedin.com ${q}`)}&b=${b}&fr2=time&age=1m`;
-}
-async function collectFromYahoo() {
-  const all = new Set();
+// Yahoo (fr2=time&age=1m) / fallback
+const YAHOO_Q = (q, b=1) =>
+  `https://search.yahoo.com/search?p=${encodeURIComponent(`site:linkedin.com ${q}`)}&b=${b}&fr2=time&age=1m`;
+const YAHOO_Q_ALL = (q, b=1) =>
+  `https://search.yahoo.com/search?p=${encodeURIComponent(`site:linkedin.com ${q}`)}&b=${b}`;
+
+async function collectYahoo({withTime=true}={}) {
+  const all = new Set(); let pages=0;
   for (const q of QUERY_VARIANTS) {
     for (const b of YAHOO_BS) {
-      const url = JINA(YAHOO_Q(q, b));
+      const url = JINA((withTime ? YAHOO_Q : YAHOO_Q_ALL)(q, b));
       try {
         const res = await timedFetch(url, { headers: { Accept: "text/plain" } });
         if (!res.ok) continue;
         const text = await res.text();
         for (const m of text.matchAll(LI_POST_RE)) all.add(m[1]);
+        pages++;
       } catch {}
-      await sleep(200);
+      await sleep(180);
     }
   }
+  console.log(`[LI] Yahoo ${withTime?'30j':'(no time)'} pages=${pages} → ${all.size} liens`);
   return [...all];
 }
 
-// DuckDuckGo (df=m)
-function DDG_Q(q, s=0){
-  return `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&s=${s}&df=m`;
-}
-async function collectFromDDG() {
-  const all = new Set();
+// DuckDuckGo (df=m) / fallback
+const DDG_Q = (q, s=0) =>
+  `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&s=${s}&df=m`;
+const DDG_Q_ALL = (q, s=0) =>
+  `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&s=${s}`;
+
+async function collectDDG({withTime=true}={}) {
+  const all = new Set(); let pages=0;
   for (const q of QUERY_VARIANTS) {
     for (const s of DDG_STARTS) {
-      const url = JINA(DDG_Q(q, s));
+      const url = JINA((withTime ? DDG_Q : DDG_Q_ALL)(q, s));
       try {
         const res = await timedFetch(url, { headers: { Accept: "text/plain" } });
         if (!res.ok) continue;
         const text = await res.text();
         for (const m of text.matchAll(LI_POST_RE)) all.add(m[1]);
+        pages++;
       } catch {}
-      await sleep(200);
+      await sleep(180);
     }
   }
+  console.log(`[LI] DDG ${withTime?'30j':'(no time)'} pages=${pages} → ${all.size} liens`);
   return [...all];
 }
 
@@ -266,47 +296,63 @@ async function collectFromDDG() {
 async function main(){
   ensureDir(OUT_DIR);
 
-  // On interroge plusieurs moteurs, puis on fusionne/dédoublonne
-  const batches = await Promise.allSettled([
-    collectFromGoogle(),
-    collectFromBing(),
-    collectFromYahoo(),
-    collectFromDDG(),
+  // 1) Essai avec filtres "dernier mois"
+  const batches30 = await Promise.allSettled([
+    collectGoogle({withTime:true}),
+    collectBing({withTime:true}),
+    collectYahoo({withTime:true}),
+    collectDDG({withTime:true}),
   ]);
 
-  const links = new Set();
-  for (const b of batches) {
-    if (b.status === "fulfilled" && Array.isArray(b.value)) {
-      for (const u of b.value) {
-        if (isLikelyPost(u)) links.add(u);
-      }
+  const linksSet = new Set();
+  const addAll = (arr) => Array.isArray(arr) && arr.forEach(u => { if (isLikelyPost(u)) linksSet.add(u); });
+
+  let total30 = 0;
+  for (const b of batches30) {
+    if (b.status === "fulfilled") { addAll(b.value); total30 += (b.value?.length || 0); }
+  }
+  console.log(`[LI] Fusion 30j uniques: ${linksSet.size} (bruts: ${total30})`);
+
+  // 2) Si rien → fallback sans filtre de temps (pour casser un throttling trop agressif)
+  if (linksSet.size === 0) {
+    const batchesAll = await Promise.allSettled([
+      collectGoogle({withTime:false}),
+      collectBing({withTime:false}),
+      collectYahoo({withTime:false}),
+      collectDDG({withTime:false}),
+    ]);
+    let totalAll = 0;
+    for (const b of batchesAll) {
+      if (b.status === "fulfilled") { addAll(b.value); totalAll += (b.value?.length || 0); }
     }
+    console.log(`[LI] Fusion fallback uniques: ${linksSet.size} (bruts: ${totalAll})`);
   }
 
-  const allLinks = [...links];
-  console.log(`[LI] Liens LinkedIn (30j) collectés: ${allLinks.length}`);
-
+  const allLinks = [...linksSet];
+  console.log(`[LI] Liens LinkedIn collectés (après fusion): ${allLinks.length}`);
   if (!allLinks.length) {
-    console.log("[LI] Aucun lien ce run (ou throttling des moteurs).");
+    console.log("[LI] Aucun lien ce run (throttling probable).");
     return;
   }
 
   const existing = readExisting();
   const seen = new Set();
-  let created = 0;
+  let created = 0, skippedIrrelevant = 0;
 
   for (const link of allLinks) {
     const key = normalizeUrl(link);
     if (seen.has(key) || existing.has(key)) continue;
     seen.add(key);
 
-    let meta = await fetchOgMetaLinkedIn(link);
+    const meta = await fetchOgMetaLinkedIn(link);
+    if (meta.irrelevant) { skippedIrrelevant++; continue; }
+
     writeItem(link, meta);
     created++;
   }
 
-  console.log(`✅ LinkedIn (30j) CleaReconDL: ${created} fichier(s) généré(s) → ${OUT_DIR}`);
+  console.log(`✅ LinkedIn CleaReconDL: ${created} fichier(s) nouvellement généré(s) → ${OUT_DIR}`);
+  if (skippedIrrelevant) console.log(`ℹ️  Posts ignorés (non pertinents après lecture OG): ${skippedIrrelevant}`);
 }
 
 main().catch((e)=>{ console.error(e); process.exit(1); });
-
