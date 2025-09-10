@@ -1,33 +1,32 @@
-// scripts/generate-linkedin-clearecondl.js
-// v5.1 — LinkedIn posts contenant : #cleareconDL | "CleaRecon DL" | "CleaReconDL"
-// Ordre : 1) Bing API 2) SerpAPI 3) Google HTML 4) Yahoo HTML 5) Fallback Bing/DDG (lent)
-// État PERSISTANT + MIGRATION auto des anciens .serp-state.json
+// scripts/generate-twitter-clearecondl.js
+// Tweets (X) sur 1 mois glissant contenant : #cleareconDL | "CleaRecon DL" | "CleaReconDL"
+// 1) SerpAPI (si SERPAPI_KEY) avec tbs=qdr:m  2) Google HTML (via r.jina.ai) avec tbs=qdr:m (fallback)
+// Écrit des .md dans src/content/tweets-clearecondl + vignettes (image pbs.twimg.com si trouvée, sinon avatar)
 
 import fs from "node:fs";
 import path from "node:path";
 import fetch from "node-fetch";
 import slugify from "slugify";
 
-const OUT_DIR = path.join("src", "content", "li-clearecondl");
+/* ---------- Config ---------- */
+const OUT_DIR = path.join("src", "content", "tweets-clearecondl");
 const STATE_FILE = path.join(OUT_DIR, ".serp-state.json");
 const UA = "Mozilla/5.0 (compatible; clearecondl-bot/1.0; +https://example.org)";
 const TIMEOUT = 15000;
 const RETRIES = 1;
 
-/* ----------------- Requêtes ----------------- */
+// Variantes de requêtes
 const QUERY_VARIANTS = [
   '"#cleareconDL"',
   '"CleaRecon DL"',
   '"CleaReconDL"',
 ];
 
-// Pagination par source
-const BING_OFFSETS   = [0, 50, 100, 150, 200];
+// Pagination
 const SERPAPI_STARTS = [0, 100, 200, 300];
 const GOOGLE_STARTS  = [0, 10, 20, 30, 40];
-const YAHOO_BS       = [1, 11, 21, 31, 41]; // param 'b' (1-based)
 
-/* ----------------- HTTP utils ----------------- */
+/* ---------- Utils ---------- */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function timedFetch(url, opts = {}, retries = RETRIES) {
   for (let i = 0; ; i++) {
@@ -49,11 +48,9 @@ async function timedFetch(url, opts = {}, retries = RETRIES) {
     }
   }
 }
-
-/* ----------------- Utils ----------------- */
 function ensureDir(d) { fs.mkdirSync(d, { recursive: true }); }
-function clean(s=""){ return String(s).replace(/\s+/g," ").trim(); }
-function normalizeUrl(u){ try{ const x=new URL(u); return (x.origin+x.pathname).replace(/\/+$/,"").toLowerCase(); } catch{ return String(u||"").toLowerCase(); } }
+function clean(s = "") { return String(s).replace(/\s+/g, " ").trim(); }
+function normalizeUrl(u) { try { const x=new URL(u); return (x.origin+x.pathname).replace(/\/+$/,"").toLowerCase(); } catch { return String(u||"").toLowerCase(); } }
 function yaml(frontmatter) {
   const esc = (v) => String(v).replace(/"/g, '\\"');
   return Object.entries(frontmatter).map(([k,v]) =>
@@ -62,112 +59,104 @@ function yaml(frontmatter) {
 }
 const JINA = (u) => `https://r.jina.ai/http://${u.replace(/^https?:\/\//, "")}`;
 
-/* --------- Reconnaissance d'URL LinkedIn (posts) --------- */
-const LI_POST_RE =
-  /(https?:\/\/(?:[a-z]+\.)?linkedin\.com\/(?:(?:company\/[^/]+\/posts\/[^\s"')<>]+)|(?:posts\/[^\s"')<>]+)|(?:feed\/update\/urn:li:(?:activity|ugcPost|share):[0-9A-Za-z_-]+)))/gi;
-
-function isLikelyPost(u) {
-  try {
-    const p = new URL(u).pathname.toLowerCase();
-    return p.startsWith("/posts/") ||
-      p.includes("/feed/update/urn:li:activity:") ||
-      p.includes("/feed/update/urn:li:ugcpost:") ||
-      p.includes("/feed/update/urn:li:share:") ||
-      /\/company\/[^/]+\/posts\//.test(p);
-  } catch { return false; }
+/* ---------- Reconnaissance d'URL de tweet ---------- */
+const TWEET_URL_RE = /(https?:\/\/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{1,15})\/status\/(\d+))/gi;
+function parseTweetUrl(u) {
+  const m = String(u).match(/https?:\/\/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/i);
+  if (!m) return null;
+  return { username: m[1], id: m[2] };
 }
 
-/* ----------------- State + migration ----------------- */
+/* ---------- State avec migration ---------- */
 function defaultState() {
   return {
-    source: null,
-    bing:    Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
     serpapi: Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
     google:  Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
-    yahoo:   Object.fromEntries(QUERY_VARIANTS.map(q=>[q,0])),
-    fallback: { step: 0 },
   };
-}
-function migrateState(s) {
-  const d = defaultState();
-  const out = { ...d, ...(s && typeof s === "object" ? s : {}) };
-
-  // Assure chaque section + clés par requête
-  for (const section of ["bing","serpapi","google","yahoo"]) {
-    if (!out[section] || typeof out[section] !== "object") out[section] = {};
-    for (const q of QUERY_VARIANTS) {
-      if (!Number.isInteger(out[section][q])) out[section][q] = 0;
-    }
-  }
-  if (!out.fallback || typeof out.fallback !== "object") out.fallback = { step: 0 };
-  if (!Number.isInteger(out.fallback.step)) out.fallback.step = 0;
-  if (!("source" in out)) out.source = null;
-
-  return out;
 }
 function readState() {
   try {
     if (!fs.existsSync(STATE_FILE)) return defaultState();
-    const raw = fs.readFileSync(STATE_FILE, "utf-8");
-    const parsed = JSON.parse(raw);
-    const merged = migrateState(parsed);
-    if (JSON.stringify(merged) !== JSON.stringify(parsed)) {
-      // migration silencieuse
-      writeState(merged);
-      console.log("[LI] State migré → nouvelle structure.");
+    const s = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
+    // migration douce
+    const d = defaultState();
+    const out = { ...d, ...s };
+    for (const q of QUERY_VARIANTS) {
+      if (!Number.isInteger(out.serpapi[q])) out.serpapi[q] = 0;
+      if (!Number.isInteger(out.google[q]))  out.google[q]  = 0;
     }
-    return merged;
+    if (JSON.stringify(out) !== JSON.stringify(s)) writeState(out);
+    return out;
   } catch {
     return defaultState();
   }
 }
-function writeState(s){ ensureDir(OUT_DIR); fs.writeFileSync(STATE_FILE, JSON.stringify(s,null,2),"utf-8"); }
+function writeState(s) { ensureDir(OUT_DIR); fs.writeFileSync(STATE_FILE, JSON.stringify(s,null,2),"utf-8"); }
 
-/* ----------------- OG via proxy ----------------- */
-async function fetchOgMetaLinkedIn(url) {
+/* ---------- Enrichissement : titre/desc + vignette ---------- */
+async function fetchTweetMeta(url, username) {
   try {
     const res = await timedFetch(JINA(url), { headers: { Accept: "text/html" } });
-    if (!res.ok) return { title:"", desc:"", image:null };
+    if (!res.ok) return fallbackMeta(username);
     const html = await res.text();
+
     const pick = (re) => html.match(re)?.[1] || "";
-    const image = [
-      /<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i,
-      /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/i,
-    ].map(re=>pick(re))
-     .map(u=>{ try{ return new URL(u,url).href; } catch { return ""; } })
-     .find(Boolean) || null;
-    const title = pick(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["']/i) || "";
-    const desc  = pick(/<meta[^>]+property=["']og:description["'][^>]*content=["']([^"']+)["']/i) || "";
-    return { title: clean(title), desc: clean(desc), image };
-  } catch { return { title:"", desc:"", image:null }; }
+    const title = clean(
+      pick(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["']/i) ||
+      pick(/<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)["']/i)
+    );
+    const desc = clean(
+      pick(/<meta[^>]+property=["']og:description["'][^>]*content=["']([^"']+)["']/i) ||
+      pick(/<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)["']/i)
+    );
+
+    // Tente d'attraper une image du tweet (pbs.twimg.com)
+    let media = "";
+    const mediaMatch = html.match(/https?:\/\/pbs\.twimg\.com\/media\/[A-Za-z0-9_\-]+\.[a-zA-Z0-9?=.&_%+-]+/i);
+    if (mediaMatch) media = mediaMatch[0];
+
+    const ogimg = pick(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+    const image = media || ogimg || `https://unavatar.io/twitter/${username}`;
+
+    return {
+      title: title || `Tweet de @${username}`,
+      desc: desc || title || "",
+      image
+    };
+  } catch {
+    return fallbackMeta(username);
+  }
+}
+function fallbackMeta(username) {
+  return { title: `Tweet de @${username}`, desc: "", image: `https://unavatar.io/twitter/${username}` };
 }
 
-/* ----------------- E/S contenus ----------------- */
-function readExisting(){
-  const set=new Set();
-  if(!fs.existsSync(OUT_DIR)) return set;
-  for(const f of fs.readdirSync(OUT_DIR)){
-    if(!f.endsWith(".md")) continue;
-    const txt = fs.readFileSync(path.join(OUT_DIR,f), "utf-8");
+/* ---------- E/S contenus ---------- */
+function readExisting() {
+  const set = new Set();
+  if (!fs.existsSync(OUT_DIR)) return set;
+  for (const f of fs.readdirSync(OUT_DIR)) {
+    if (!f.endsWith(".md")) continue;
+    const txt = fs.readFileSync(path.join(OUT_DIR, f), "utf-8");
     const m = txt.match(/sourceUrl:\s*"([^"]+)"/);
-    if(m) set.add(normalizeUrl(m[1]));
+    if (m) set.add(normalizeUrl(m[1]));
   }
   return set;
 }
-function writeItem(link, meta){
+function writeItem(link, meta) {
   ensureDir(OUT_DIR);
-  const d=new Date();
-  const yyyy=d.getUTCFullYear(), mm=String(d.getUTCMonth()+1).padStart(2,"0"), dd=String(d.getUTCDate()).padStart(2,"0");
-  const base = `${yyyy}-${mm}-${dd}-${slugify(meta.title || "post", { lower:true, strict:true }).slice(0,80)}`;
+  const d = new Date(); // pas de date fiable → timestamp d'indexation (recherche déjà limitée à 1 mois)
+  const yyyy = d.getUTCFullYear(), mm = String(d.getUTCMonth()+1).padStart(2,"0"), dd = String(d.getUTCDate()).padStart(2,"0");
+  const base = `${yyyy}-${mm}-${dd}-${slugify(meta.title || "tweet", { lower:true, strict:true }).slice(0,80)}`;
   const file = path.join(OUT_DIR, `${base}.md`);
   const fm = {
-    title: meta.title || "Post LinkedIn",
+    title: meta.title || "Tweet",
     date: d.toISOString(),
     publishedDate: d.toLocaleDateString("fr-FR", { year:"numeric", month:"long", day:"numeric" }),
-    summary: meta.desc || meta.title || "Publication LinkedIn",
+    summary: meta.desc || meta.title || "",
     sourceUrl: link,
-    permalink: `/li-clearecondl/${base}`,
-    tags: ["LinkedIn", "CleaReconDL"],
+    permalink: `/tweets-clearecondl/${base}`,
+    tags: ["Twitter", "CleaReconDL"],
     imageUrl: meta.image || "",
     imageCredit: meta.image ? `Image — ${link}` : "",
   };
@@ -176,194 +165,114 @@ function writeItem(link, meta){
   fs.writeFileSync(file, `---\n${yaml(fm)}---\n\n${body}`, "utf-8");
 }
 
-/* ----------------- 1) Bing Web Search API ----------------- */
-async function collectFromBingApi(state){
-  const key = process.env.AZURE_BING_KEY;
-  if(!key) return null;
-  const all = new Set();
-  for(const q of QUERY_VARIANTS){
-    const idx = Number.isInteger(state.bing?.[q]) ? state.bing[q] : 0;
-    const offset = BING_OFFSETS[idx % BING_OFFSETS.length];
-    const params = new URLSearchParams({
-      q: `site:linkedin.com (${q})`, mkt:"fr-FR", count:"50", offset:String(offset),
-      responseFilter:"Webpages", textFormat:"Raw"
-    });
-    const url = `https://api.bing.microsoft.com/v7.0/search?${params.toString()}`;
-    const res = await timedFetch(url, { headers: { "Ocp-Apim-Subscription-Key": key } });
-    if(!res.ok){ console.error(`[LI] Bing API ${res.status} offset=${offset} q=${q}`); continue; }
-    const data = await res.json();
-    const items = data?.webPages?.value || [];
-    for(const it of items){
-      const u = it.url;
-      if (typeof u === "string" && isLikelyPost(u)) all.add(u);
-      const sn = `${it.snippet || ""} ${it.name || ""}`;
-      for (const m of sn.matchAll(LI_POST_RE)) all.add(m[1]);
-    }
-    state.bing ??= {}; state.bing[q] = (idx + 1) % BING_OFFSETS.length;
-    await sleep(300);
-  }
-  state.source = "bing";
-  return [...all];
-}
-
-/* ----------------- 2) SerpAPI (Google) ----------------- */
-async function collectFromSerpApi(state){
+/* ---------- 1) SerpAPI (Google) ---------- */
+async function collectFromSerpApi(state) {
   const key = process.env.SERPAPI_KEY;
-  if(!key) return null;
+  if (!key) return null;
+
   const all = new Set();
-  for(const q of QUERY_VARIANTS){
+  for (const q of QUERY_VARIANTS) {
     const idx = Number.isInteger(state.serpapi?.[q]) ? state.serpapi[q] : 0;
     const start = SERPAPI_STARTS[idx % SERPAPI_STARTS.length];
-    const params = new URLSearchParams({
-      engine:"google", q:`site:linkedin.com ${q}`, hl:"fr", gl:"fr", num:"100", start:String(start), api_key:key
-    });
-    const url = `https://serpapi.com/search.json?${params.toString()}`;
-    const res = await timedFetch(url);
-    if(!res.ok){ console.error(`[LI] SerpAPI ${res.status} start=${start} q=${q}`); continue; }
-    const data = await res.json();
-    for(const r of data?.organic_results || []){
-      const u = r.link;
-      if(typeof u === "string" && isLikelyPost(u)) all.add(u);
-      const text = [r.snippet, r.title].filter(Boolean).join(" ");
-      for(const m of text.matchAll(LI_POST_RE)) all.add(m[1]);
+
+    for (const domain of ["twitter.com", "x.com"]) {
+      const params = new URLSearchParams({
+        engine: "google",
+        q: `site:${domain} ${q}`,
+        hl: "fr",
+        gl: "fr",
+        num: "100",
+        start: String(start),
+        tbs: "qdr:m", // ← 1 mois
+        api_key: key,
+      });
+      const url = `https://serpapi.com/search.json?${params.toString()}`;
+      const res = await timedFetch(url);
+      if (!res.ok) { console.error(`[TW] SerpAPI ${res.status} start=${start} q=${q} site:${domain}`); continue; }
+      const data = await res.json();
+      for (const r of data?.organic_results || []) {
+        const text = [r.link, r.title, r.snippet].filter(Boolean).join(" ");
+        for (const m of text.matchAll(TWEET_URL_RE)) all.add(m[1]);
+      }
+      await sleep(250);
     }
+
     state.serpapi ??= {}; state.serpapi[q] = (idx + 1) % SERPAPI_STARTS.length;
-    await sleep(300);
   }
-  state.source = "serpapi";
   return [...all];
 }
 
-/* ----------------- 3) Google HTML (via r.jina.ai) ----------------- */
-function GOOGLE_Q(q, start=0){
-  return `https://www.google.com/search?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&hl=fr&num=10&start=${start}`;
+/* ---------- 2) Google HTML (via r.jina.ai) ---------- */
+function GOOGLE_Q(q, domain, start=0) {
+  // tbs=qdr:m → dernier mois
+  return `https://www.google.com/search?q=${encodeURIComponent(`site:${domain} ${q}`)}&hl=fr&num=10&start=${start}&tbs=qdr:m`;
 }
-function extractGoogleUrls(txt){
-  const out = new Set();
-  for(const m of txt.matchAll(LI_POST_RE)) out.add(m[1]);
-  for(const m of txt.matchAll(/https?:\/\/www\.google\.[^/\s]+\/url\?q=([^&\s]+)/gi)){
-    try{
-      const u = decodeURIComponent(m[1]);
-      if(isLikelyPost(u)) out.add(u);
-    }catch{}
-  }
-  return [...out];
-}
-async function collectFromGoogleHtml(state){
+async function collectFromGoogleHtml(state) {
   const all = new Set();
-  for(const q of QUERY_VARIANTS){
+  for (const q of QUERY_VARIANTS) {
     const idx = Number.isInteger(state.google?.[q]) ? state.google[q] : 0;
     const start = GOOGLE_STARTS[idx % GOOGLE_STARTS.length];
-    const prox = JINA(GOOGLE_Q(q, start));
-    try{
-      const res = await timedFetch(prox, { headers: { Accept: "text/plain" } });
-      if(!res.ok){ console.error(`[LI] Google HTML ${res.status} start=${start} q=${q}`); continue; }
-      const text = await res.text();
-      extractGoogleUrls(text).forEach(u => all.add(u));
-    }catch(e){ console.error("[LI] Google HTML error:", String(e).slice(0,160)); }
+
+    for (const domain of ["twitter.com", "x.com"]) {
+      const prox = JINA(GOOGLE_Q(q, domain, start));
+      try {
+        const res = await timedFetch(prox, { headers: { Accept: "text/plain" } });
+        if (!res.ok) { console.error(`[TW] Google HTML ${res.status} start=${start} q=${q} site:${domain}`); continue; }
+        const text = await res.text();
+        for (const m of text.matchAll(TWEET_URL_RE)) all.add(m[1]);
+      } catch (e) {
+        console.error("[TW] Google HTML error:", String(e).slice(0,160));
+      }
+      await sleep(300);
+    }
+
     state.google ??= {}; state.google[q] = (idx + 1) % GOOGLE_STARTS.length;
-    await sleep(500);
   }
-  state.source = "google-html";
   return [...all];
 }
 
-/* ----------------- 4) Yahoo HTML (via r.jina.ai) ----------------- */
-function YAHOO_Q(q, b=1){
-  return `https://search.yahoo.com/search?p=${encodeURIComponent(`site:linkedin.com ${q}`)}&b=${b}`;
-}
-async function collectFromYahooHtml(state){
-  const all = new Set();
-  for(const q of QUERY_VARIANTS){
-    const idx = Number.isInteger(state.yahoo?.[q]) ? state.yahoo[q] : 0;
-    const b = YAHOO_BS[idx % YAHOO_BS.length];
-    const prox = JINA(YAHOO_Q(q, b));
-    try{
-      const res = await timedFetch(prox, { headers: { Accept: "text/plain" } });
-      if(!res.ok){ console.error(`[LI] Yahoo HTML ${res.status} b=${b} q=${q}`); continue; }
-      const text = await res.text();
-      for(const m of text.matchAll(LI_POST_RE)) all.add(m[1]);
-    }catch(e){ console.error("[LI] Yahoo HTML error:", String(e).slice(0,160)); }
-    state.yahoo ??= {}; state.yahoo[q] = (idx + 1) % YAHOO_BS.length;
-    await sleep(500);
-  }
-  state.source = "yahoo-html";
-  return [...all];
-}
-
-/* ----------------- 5) Fallback Bing/DDG (lent) ----------------- */
-const BING_HTML = (q, first=1) => `https://www.bing.com/search?q=${encodeURIComponent(`site:linkedin.com (${q})`)}&setlang=fr&count=50&first=${first}`;
-const DDG_HTML  = (q, s=0)       => `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:linkedin.com ${q}`)}&s=${s}`;
-async function collectFromFallback(state){
-  const step = Number.isInteger(state.fallback?.step) ? state.fallback.step : 0;
-  const pages = [
-    ...QUERY_VARIANTS.map((q,i)=>({ type:"bing", q, first: BING_OFFSETS[(step+i)%BING_OFFSETS.length] || 1 })),
-    ...QUERY_VARIANTS.map((q,i)=>({ type:"ddg",  q, s:     SERPAPI_STARTS[(step+i)%SERPAPI_STARTS.length] || 0 })),
-  ];
-  const all = new Set();
-  for(const p of pages){
-    const url = p.type === "bing" ? BING_HTML(p.q, p.first) : DDG_HTML(p.q, p.s);
-    const prox = JINA(url);
-    try{
-      const res = await timedFetch(prox, { headers: { Accept: "text/plain" } });
-      if(!res.ok){ console.error(`[LI] Fallback ${p.type} ${res.status} q=${p.q}`); continue; }
-      const text = await res.text();
-      for(const m of text.matchAll(LI_POST_RE)) all.add(m[1]);
-    }catch(e){ console.error("[LI] Fallback error:", String(e).slice(0,160)); }
-    await sleep(400);
-  }
-  state.fallback ??= { step: 0 };
-  state.fallback.step = (step + 1) % 8;
-  state.source = "fallback";
-  return [...all];
-}
-
-/* ----------------- MAIN ----------------- */
-async function main(){
+/* ---------- MAIN ---------- */
+async function main() {
   ensureDir(OUT_DIR);
-  const state = readState(); // ← MIGRE auto si besoin
+  const state = readState();
 
   let links = null;
 
-  try { links = await collectFromBingApi(state); } catch(e){ console.error(e); }
-  if(!links || !links.length){
-    try { const l2 = await collectFromSerpApi(state); if(l2 && l2.length) links = l2; } catch(e){ console.error(e); }
-  }
-  if(!links || !links.length){
-    try { const l3 = await collectFromGoogleHtml(state); if(l3 && l3.length) links = l3; } catch(e){ console.error(e); }
-  }
-  if(!links || !links.length){
-    try { const l4 = await collectFromYahooHtml(state); if(l4 && l4.length) links = l4; } catch(e){ console.error(e); }
-  }
-  if(!links || !links.length){
-    try { const l5 = await collectFromFallback(state); links = l5 || []; } catch(e){ console.error(e); links = []; }
+  // 1) SerpAPI si dispo
+  try { links = await collectFromSerpApi(state); } catch (e) { console.error(e); }
+
+  // 2) Google HTML sinon
+  if (!links || !links.length) {
+    try { links = await collectFromGoogleHtml(state); } catch (e) { console.error(e); links = []; }
   }
 
   writeState(state);
-  console.log(`[LI] Source utilisée: ${state.source || "none"} — ${links.length} lien(s) collecté(s) ce run.`);
+  console.log(`[TW] Liens collectés ce run: ${links.length}`);
 
-  if(!links.length){
-    console.log("[LI] Aucun lien ce run. Le crawler avancera à la prochaine exécution.");
+  if (!links.length) {
+    console.log("[TW] Aucun tweet trouvé ce run (ou throttling). On réessaiera au prochain run.");
     return;
   }
 
+  // Dé-dup avec existants
   const existing = readExisting();
   const seen = new Set();
   let created = 0;
 
-  for(const link of links){
+  for (const link of links) {
     const key = normalizeUrl(link);
-    if(seen.has(key) || existing.has(key)) continue;
+    if (seen.has(key) || existing.has(key)) continue;
     seen.add(key);
 
-    let meta = { title:"", desc:"", image:null };
-    try{ meta = await fetchOgMetaLinkedIn(link); }catch{}
+    const parsed = parseTweetUrl(link);
+    if (!parsed) continue;
 
+    const meta = await fetchTweetMeta(link, parsed.username);
     writeItem(link, meta);
     created++;
   }
 
-  console.log(`✅ LinkedIn CleaReconDL: ${created} fichier(s) généré(s) → ${OUT_DIR}`);
+  console.log(`✅ Twitter CleaReconDL: ${created} fichier(s) généré(s) → ${OUT_DIR}`);
 }
 
 main().catch((e)=>{ console.error(e); process.exit(1); });
