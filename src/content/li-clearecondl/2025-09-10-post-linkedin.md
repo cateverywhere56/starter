@@ -1,16 +1,16 @@
 ---
 title: "Post LinkedIn"
-date: "2025-09-10T10:43:10.743Z"
+date: "2025-09-10T11:51:15.226Z"
 publishedDate: "10 septembre 2025"
 summary: "Post LinkedIn"
-sourceUrl: "https://www.linkedin.com/posts/revnacomertpay_aiinhealthcare-medicaldiagnostics-precisionmedicine-activity-7178041227458560002-xwY2"
+sourceUrl: "https://pe.linkedin.com/posts/helenezemb_gest2025-gehealthcare-clearecondl-activity-7330095628917628928-w-Zu"
 permalink: "/li-clearecondl/2025-09-10-post-linkedin"
 tags: ["LinkedIn", "CleaReconDL", "2025"]
-imageUrl: "https://unavatar.io/linkedin/revnacomertpay_aiinhealthcaremedicaldiagnostics"
-imageCredit: "Image — https://www.linkedin.com/posts/revnacomertpay_aiinhealthcare-medicaldiagnostics-precisionmedicine-activity-7178041227458560002-xwY2"
+imageUrl: "https://unavatar.io/linkedin/helenezemb_gest2025gehealthcare"
+imageCredit: "Image — https://pe.linkedin.com/posts/helenezemb_gest2025-gehealthcare-clearecondl-activity-7330095628917628928-w-Zu"
 ---
 
-![Post LinkedIn](https://unavatar.io/linkedin/revnacomertpay_aiinhealthcaremedicaldiagnostics)
+![Post LinkedIn](https://unavatar.io/linkedin/helenezemb_gest2025gehealthcare)
 
 ## Résumé
 
@@ -18,4 +18,4 @@ Post LinkedIn
 
 ## Lien
 
-https://www.linkedin.com/posts/revnacomertpay_aiinhealthcare-medicaldiagnostics-precisionmedicine-activity-7178041227458560002-xwY2
+https://pe.linkedin.com/posts/helenezemb_gest2025-gehealthcare-clearecondl-activity-7330095628917628928-w-Zu
