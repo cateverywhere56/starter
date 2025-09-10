@@ -67,7 +67,7 @@ const gehcAll = Object.values(gehcRaw)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-/* Droite 2 — LinkedIn CleaReconDL (30 jours, dédoublonné) */
+/* Droite 2 — LinkedIn CleaReconDL (dédoublonné) */
 const liAll = Object.values(liRaw)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
