@@ -1,12 +1,12 @@
 ---
 /**
- * Accueil : gauche(CleaReconDL) — centre(actus) — droite1(GEHC 2025) — droite2(LinkedIn 30j)
+ * Accueil : gauche(CleaReconDL) — centre(actus) — droite1(GEHC 2025) — droite2(LinkedIn 2025)
  */
 
 /* Centre (actus) */
 const modules = import.meta.glob('../content/papers/*.md', { eager: true });
 
-/* Gauche : CleaReconDL (deux dossiers pour tolérer la casse) */
+/* Gauche : CleaReconDL */
 const clRaw = {
   ...import.meta.glob('../content/clearecondl/*.md', { eager: true }),
   ...import.meta.glob('../content/cleareconDL/*.md', { eager: true }),
@@ -15,14 +15,10 @@ const clRaw = {
 /* Droite 1 : YouTube GE HealthCare 2025 */
 const gehcRaw = import.meta.glob('../content/gehc2025/*.md', { eager: true });
 
-/* Droite 2 : LinkedIn CleaReconDL (30j) */
+/* Droite 2 : LinkedIn CleaReconDL (2025) */
 const liRaw = import.meta.glob('../content/li-clearecondl/*.md', { eager: true });
 
 /* Helpers */
-function normalizeUrl(u: string) {
-  try { const x = new URL(u); return (x.origin + x.pathname).replace(/\/+$/, '').toLowerCase(); }
-  catch { return (u || '').toLowerCase(); }
-}
 function hostOf(url: string) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
 }
@@ -53,7 +49,11 @@ const posts = Object.values(modules)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-/* Gauche — CleaReconDL fusion + dédoublonnage */
+/* Gauche — CleaReconDL fusion + dédoublonnage simple (par origin+pathname) */
+function normalizeUrl(u: string) {
+  try { const x = new URL(u); return (x.origin + x.pathname).replace(/\/+$/, '').toLowerCase(); }
+  catch { return (u || '').toLowerCase(); }
+}
 const leftAll = Object.values(clRaw)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
@@ -67,13 +67,28 @@ const gehcAll = Object.values(gehcRaw)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-/* Droite 2 — LinkedIn CleaReconDL (dédoublonné) */
+/* Droite 2 — LinkedIn 2025 (dédoublonnage spécial LinkedIn) */
+function liKey(u: string) {
+  try {
+    const x = new URL(u);
+    if (x.hostname.endsWith('linkedin.com')) {
+      // Garder updateUrn si présent (clé vraiment spécifique au post)
+      const sp = new URLSearchParams(x.search);
+      const urn = sp.get('updateUrn');
+      const base = (x.origin + x.pathname).replace(/\/+$/, '').toLowerCase();
+      return urn ? `${base}?updateUrn=${urn.toLowerCase()}` : base;
+    }
+    return (x.origin + x.pathname).replace(/\/+$/, '').toLowerCase();
+  } catch {
+    return (u || '').toLowerCase();
+  }
+}
 const liAll = Object.values(liRaw)
   .map((m) => (m as any).frontmatter)
   .filter((fm: any) => fm && fm.title && fm.sourceUrl)
   .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 const seenLI = new Set<string>();
-const liPosts = liAll.filter((p: any) => { const k = normalizeUrl(p.sourceUrl); if (seenLI.has(k)) return false; seenLI.add(k); return true; });
+const liPosts = liAll.filter((p: any) => { const k = liKey(p.sourceUrl); if (seenLI.has(k)) return false; seenLI.add(k); return true; });
 ---
 <html lang="fr">
   <head>
@@ -201,14 +216,14 @@ const liPosts = liAll.filter((p: any) => { const k = normalizeUrl(p.sourceUrl); 
             </section>
           </aside>
 
-          <!-- Droite 2 : LinkedIn CleaReconDL (30 derniers jours) -->
+          <!-- Droite 2 : LinkedIn 2025 -->
           <aside class="aside-right-2" style="position:sticky; top:16px; align-self:start;">
             <section class="card">
-              <h2 style="margin:0 0 6px 0; font-size:18px;">LinkedIn — 30&nbsp;derniers&nbsp;jours</h2>
+              <h2 style="margin:0 0 6px 0; font-size:18px;">LinkedIn — 2025</h2>
               <div style="opacity:.6; font-size:12px; margin:0 0 10px 0;">{liPosts.length} post(s)</div>
               {
                 liPosts.length === 0
-                  ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Aucun post LinkedIn récent.</p>)
+                  ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Aucun post LinkedIn trouvé pour 2025.</p>)
                   : (
                     <ul class="list-vert">
                       {liPosts.map((p: any) => (
