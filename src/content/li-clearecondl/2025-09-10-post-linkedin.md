@@ -1,16 +1,16 @@
 ---
 title: "Post LinkedIn"
-date: "2025-09-10T20:43:55.073Z"
+date: "2025-09-10T21:50:21.649Z"
 publishedDate: "10 septembre 2025"
 summary: "Post LinkedIn"
-sourceUrl: "https://www.linkedin.com/posts/helenezemb_gest2025-gehealthcare-clearecondl-activity-7330095628917628928-w-Zu"
+sourceUrl: "https://pe.linkedin.com/posts/altentechnologyusa_newsroom-ge-healthcare-activity-7342989804076179456-9ahX"
 permalink: "/li-clearecondl/2025-09-10-post-linkedin"
 tags: ["LinkedIn", "CleaReconDL", "2025"]
-imageUrl: "https://unavatar.io/linkedin/helenezemb_gest2025gehealthcare"
-imageCredit: "Image — https://www.linkedin.com/posts/helenezemb_gest2025-gehealthcare-clearecondl-activity-7330095628917628928-w-Zu"
+imageUrl: "https://unavatar.io/linkedin/altentechnologyusa_newsroomge"
+imageCredit: "Image — https://pe.linkedin.com/posts/altentechnologyusa_newsroom-ge-healthcare-activity-7342989804076179456-9ahX"
 ---
 
-![Post LinkedIn](https://unavatar.io/linkedin/helenezemb_gest2025gehealthcare)
+![Post LinkedIn](https://unavatar.io/linkedin/altentechnologyusa_newsroomge)
 
 ## Résumé
 
@@ -18,4 +18,4 @@ Post LinkedIn
 
 ## Lien
 
-https://www.linkedin.com/posts/helenezemb_gest2025-gehealthcare-clearecondl-activity-7330095628917628928-w-Zu
+https://pe.linkedin.com/posts/altentechnologyusa_newsroom-ge-healthcare-activity-7342989804076179456-9ahX
