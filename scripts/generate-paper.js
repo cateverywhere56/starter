@@ -53,13 +53,7 @@ const FEEDS = [
   //    ou surveiller les pages “Issues” via un watcher (distill.io, etc.)
   // { name: "EuroIntervention — Latest (no RSS)", url: "https://eurointervention.pcronline.com/" },
 
-  // 3) ScienceDirect — s’abonner par journal / recherche
-  //    Exemple (interventionnel): JACC: Cardiovascular Interventions
-  { name: "JACC: Cardiovascular Interventions (ScienceDirect)", url: "https://rss.sciencedirect.com/publication/science/19368798" },
-  //    Modèle générique ScienceDirect:
-  //    https://rss.sciencedirect.com/publication/science/<ISSN_ou_ID_journal>
-
-  // 4) PubMed Central (PMC) — flux “news/updates” + préférer des flux par recherche PubMed (RSS)
+    // 4) PubMed Central (PMC) — flux “news/updates” + préférer des flux par recherche PubMed (RSS)
   //    News PMC (via NCBI Insights, catégorie PMC)
   { name: "PMC — News & updates", url: "https://ncbiinsights.ncbi.nlm.nih.gov/tag/pmc/feed/" },
   //    Pour du contenu scientifique ciblé, crée un RSS via PubMed (Saved Search → Create RSS)
