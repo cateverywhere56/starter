@@ -1,24 +1,31 @@
 ---
 /**
  * Accueil : gauche(CleaReconDL) — centre(actus) — droite1(GEHC 2025) — droite2(LinkedIn 2025)
+ * - Chemins RELATIFS vers ../content/**
+ * - Dédoublonnage LI prioritaire par frontmatter.updateUrn (si dispo), sinon origin+pathname(sourceUrl)
  */
 
-/* Centre (actus) */
+/* Chargements */
 const modules = import.meta.glob('../content/papers/*.md', { eager: true });
 
-/* Gauche : CleaReconDL */
 const clRaw = {
   ...import.meta.glob('../content/clearecondl/*.md', { eager: true }),
   ...import.meta.glob('../content/cleareconDL/*.md', { eager: true }),
 };
 
-/* Droite 1 : YouTube GE HealthCare 2025 */
 const gehcRaw = import.meta.glob('../content/gehc2025/*.md', { eager: true });
+const liRaw   = import.meta.glob('../content/li-clearecondl/*.md', { eager: true });
 
-/* Droite 2 : LinkedIn CleaReconDL (2025) */
-const liRaw = import.meta.glob('../content/li-clearecondl/*.md', { eager: true });
-
-/* Helpers */
+/* Helpers champs tolérants */
+function getUrl(fm: any) {
+  return fm?.sourceUrl || fm?.url || '';
+}
+function getImage(fm: any) {
+  return fm?.imageUrl || fm?.image || '';
+}
+function getSummary(fm: any) {
+  return fm?.summary || fm?.description || '';
+}
 function hostOf(url: string) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
 }
@@ -42,53 +49,61 @@ function truncate(s: string, n = 160) {
   const x = (s || '').trim();
   return x.length > n ? x.slice(0, n - 1) + '…' : x;
 }
-
-/* Données — centre */
-const posts = Object.values(modules)
-  .map((m) => (m as any).frontmatter)
-  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
-  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-/* Gauche — CleaReconDL fusion + dédoublonnage simple (par origin+pathname) */
+function sortByDateDesc(a: any, b: any) {
+  const ad = a?.date ? new Date(a.date).getTime() : 0;
+  const bd = b?.date ? new Date(b.date).getTime() : 0;
+  return bd - ad;
+}
 function normalizeUrl(u: string) {
   try { const x = new URL(u); return (x.origin + x.pathname).replace(/\/+$/, '').toLowerCase(); }
   catch { return (u || '').toLowerCase(); }
 }
+
+/* Données — centre (actus) */
+const posts = Object.values(modules)
+  .map((m) => (m as any).frontmatter)
+  .filter((fm: any) => fm && fm.title && getUrl(fm))
+  .sort(sortByDateDesc);
+
+/* Gauche — CleaReconDL (fusion + dédoublonnage origin+pathname) */
 const leftAll = Object.values(clRaw)
   .map((m) => (m as any).frontmatter)
-  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
-  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  .filter((fm: any) => fm && fm.title && getUrl(fm))
+  .sort(sortByDateDesc);
+
 const seenLeft = new Set<string>();
-const leftPosts = leftAll.filter((p: any) => { const k = normalizeUrl(p.sourceUrl); if (seenLeft.has(k)) return false; seenLeft.add(k); return true; });
+const leftPosts = leftAll.filter((p: any) => {
+  const k = normalizeUrl(getUrl(p));
+  if (seenLeft.has(k)) return false;
+  seenLeft.add(k);
+  return true;
+});
 
 /* Droite 1 — YouTube 2025 */
 const gehcAll = Object.values(gehcRaw)
   .map((m) => (m as any).frontmatter)
-  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
-  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  .filter((fm: any) => fm && fm.title && getUrl(fm))
+  .sort(sortByDateDesc);
 
-/* Droite 2 — LinkedIn 2025 (dédoublonnage spécial LinkedIn) */
-function liKey(u: string) {
-  try {
-    const x = new URL(u);
-    if (x.hostname.endsWith('linkedin.com')) {
-      // Garder updateUrn si présent (clé vraiment spécifique au post)
-      const sp = new URLSearchParams(x.search);
-      const urn = sp.get('updateUrn');
-      const base = (x.origin + x.pathname).replace(/\/+$/, '').toLowerCase();
-      return urn ? `${base}?updateUrn=${urn.toLowerCase()}` : base;
-    }
-    return (x.origin + x.pathname).replace(/\/+$/, '').toLowerCase();
-  } catch {
-    return (u || '').toLowerCase();
-  }
+/* Droite 2 — LinkedIn 2025 (dédoublonnage spécial) */
+function liKeyFromFrontmatter(p: any) {
+  // Priorité : updateUrn (clé de post LI fiable) si disponible dans le frontmatter
+  if (p?.updateUrn) return `li:${String(p.updateUrn).toLowerCase()}`;
+  // Sinon, fallback sur origin+pathname(sourceUrl)
+  return normalizeUrl(getUrl(p));
 }
 const liAll = Object.values(liRaw)
   .map((m) => (m as any).frontmatter)
-  .filter((fm: any) => fm && fm.title && fm.sourceUrl)
-  .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  .filter((fm: any) => fm && fm.title && getUrl(fm))
+  .sort(sortByDateDesc);
+
 const seenLI = new Set<string>();
-const liPosts = liAll.filter((p: any) => { const k = liKey(p.sourceUrl); if (seenLI.has(k)) return false; seenLI.add(k); return true; });
+const liPosts = liAll.filter((p: any) => {
+  const k = liKeyFromFrontmatter(p);
+  if (seenLI.has(k)) return false;
+  seenLI.add(k);
+  return true;
+});
 ---
 <html lang="fr">
   <head>
@@ -142,20 +157,25 @@ const liPosts = liAll.filter((p: any) => { const k = liKey(p.sourceUrl); if (see
                 ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Rien pour l’instant.</p>)
                 : (
                   <ul class="list-vert">
-                    {leftPosts.map((p: any) => (
-                      <li>
-                        <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" class="item" aria-label={`Ouvrir : ${p.title}`}>
-                          {p.imageUrl
-                            ? <img src={p.imageUrl} alt="" loading="lazy" width="64" height="64" style="flex:0 0 64px; width:64px; height:64px; object-fit:cover; border-radius:8px; background:#f6f6f6;" />
-                            : <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6; display:flex; align-items:center; justify-content:center; font-size:12px; color:#777;">{hostOf(p.sourceUrl)}</div>}
-                          <div style="min-width:0;">
-                            <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">{p.title}</div>
-                            <div style="opacity:.75; font-size:12px; margin-bottom:4px;">{new Date(p.date).toLocaleDateString('fr-FR')} · {brandOf(p.sourceUrl)}</div>
-                            <div style="font-size:13px; opacity:.9;">{truncate(p.summary, 160)}</div>
-                          </div>
-                        </a>
-                      </li>
-                    ))}
+                    {leftPosts.map((p: any) => {
+                      const url = getUrl(p);
+                      const image = getImage(p);
+                      const summary = getSummary(p);
+                      return (
+                        <li>
+                          <a href={url} target="_blank" rel="noopener noreferrer" class="item" aria-label={`Ouvrir : ${p.title}`}>
+                            {image
+                              ? <img src={image} alt="" loading="lazy" width="64" height="64" style="flex:0 0 64px; width:64px; height:64px; object-fit:cover; border-radius:8px; background:#f6f6f6;" />
+                              : <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6; display:flex; align-items:center; justify-content:center; font-size:12px; color:#777;">{hostOf(url)}</div>}
+                            <div style="min-width:0;">
+                              <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">{p.title}</div>
+                              <div style="opacity:.75; font-size:12px; margin-bottom:4px;">{p.date ? new Date(p.date).toLocaleDateString('fr-FR') : ''} · {brandOf(url)}</div>
+                              <div style="font-size:13px; opacity:.9;">{truncate(summary, 160)}</div>
+                            </div>
+                          </a>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )
             }
@@ -168,18 +188,23 @@ const liPosts = liAll.filter((p: any) => { const k = liKey(p.sourceUrl); if (see
             ? (<p style="margin-top:6px; opacity:.8;">Aucune actualité pour l’instant.</p>)
             : (
               <main style="display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(280px,1fr));">
-                {posts.map((p: any) => (
-                  <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" aria-label={`Ouvrir l’article source : ${p.title}`} style="text-decoration:none; color:inherit; background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:16px; display:block; box-shadow:0 1px 2px rgba(0,0,0,.04);">
-                    {p.imageUrl && (<img src={p.imageUrl} alt={p.title} loading="lazy" style="display:block; width:100%; height:auto; max-height:260px; object-fit:contain; background:#f6f6f6; border-radius:10px; margin-bottom:10px;" />)}
-                    <h3 style="margin:0 0 6px 0; line-height:1.25;">{p.title}</h3>
-                    <div style="opacity:.7; font-size: 14px; margin-bottom:8px;">{new Date(p.date).toLocaleDateString('fr-FR')}</div>
-                    <p style="margin-top:0; opacity:.9;">{p.summary}</p>
-                    <div style="display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; opacity:.9;">
-                      {faviconOf(p.sourceUrl) && (<img src={faviconOf(p.sourceUrl)} alt="" width="16" height="16" style="border-radius:4px; flex:0 0 16px;" />)}
-                      <span>{brandOf(p.sourceUrl)}</span>
-                    </div>
-                  </a>
-                ))}
+                {posts.map((p: any) => {
+                  const url = getUrl(p);
+                  const image = getImage(p);
+                  const summary = getSummary(p);
+                  return (
+                    <a href={url} target="_blank" rel="noopener noreferrer" aria-label={`Ouvrir l’article source : ${p.title}`} style="text-decoration:none; color:inherit; background:#fff; border:1px solid #eaeaea; border-radius:14px; padding:16px; display:block; box-shadow:0 1px 2px rgba(0,0,0,.04);">
+                      {image && (<img src={image} alt={p.title} loading="lazy" style="display:block; width:100%; height:auto; max-height:260px; object-fit:contain; background:#f6f6f6; border-radius:10px; margin-bottom:10px;" />)}
+                      <h3 style="margin:0 0 6px 0; line-height:1.25;">{p.title}</h3>
+                      <div style="opacity:.7; font-size: 14px; margin-bottom:8px;">{p.date ? new Date(p.date).toLocaleDateString('fr-FR') : ''}</div>
+                      <p style="margin-top:0; opacity:.9;">{summary}</p>
+                      <div style="display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; opacity:.9;">
+                        {faviconOf(url) && (<img src={faviconOf(url)} alt="" width="16" height="16" style="border-radius:4px; flex:0 0 16px;" />)}
+                        <span>{brandOf(url)}</span>
+                      </div>
+                    </a>
+                  );
+                })}
               </main>
             )
         }
@@ -196,20 +221,25 @@ const liPosts = liAll.filter((p: any) => { const k = liKey(p.sourceUrl); if (see
                   ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Aucune vidéo indexée.</p>)
                   : (
                     <ul class="list-vert">
-                      {gehcAll.map((v: any) => (
-                        <li>
-                          <a href={v.sourceUrl} target="_blank" rel="noopener noreferrer" class="item" aria-label={`Ouvrir la vidéo : ${v.title}`}>
-                            {v.imageUrl
-                              ? <img src={v.imageUrl} alt="" loading="lazy" width="96" height="54" style="flex:0 0 96px; width:96px; height:54px; object-fit:cover; border-radius:6px; background:#f6f6f6;" />
-                              : <div style="flex:0 0 96px; width:96px; height:54px; border-radius:6px; background:#f6f6f6;"></div>}
-                            <div style="min-width:0;">
-                              <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">{v.title}</div>
-                              <div style="opacity:.75; font-size:12px; margin-bottom:4px;">{new Date(v.date).toLocaleDateString('fr-FR')} · YouTube</div>
-                              <div style="font-size:13px; opacity:.9;">{truncate(v.summary, 140)}</div>
-                            </div>
-                          </a>
-                        </li>
-                      ))}
+                      {gehcAll.map((v: any) => {
+                        const url = getUrl(v);
+                        const image = getImage(v);
+                        const summary = getSummary(v);
+                        return (
+                          <li>
+                            <a href={url} target="_blank" rel="noopener noreferrer" class="item" aria-label={`Ouvrir la vidéo : ${v.title}`}>
+                              {image
+                                ? <img src={image} alt="" loading="lazy" width="96" height="54" style="flex:0 0 96px; width:96px; height:54px; object-fit:cover; border-radius:6px; background:#f6f6f6;" />
+                                : <div style="flex:0 0 96px; width:96px; height:54px; border-radius:6px; background:#f6f6f6;"></div>}
+                              <div style="min-width:0;">
+                                <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">{v.title}</div>
+                                <div style="opacity:.75; font-size:12px; margin-bottom:4px;">{v.date ? new Date(v.date).toLocaleDateString('fr-FR') : ''} · YouTube</div>
+                                <div style="font-size:13px; opacity:.9;">{truncate(summary, 140)}</div>
+                              </div>
+                            </a>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )
               }
@@ -226,20 +256,25 @@ const liPosts = liAll.filter((p: any) => { const k = liKey(p.sourceUrl); if (see
                   ? (<p style="margin:6px 0 0 0; opacity:.7; font-size:14px;">Aucun post LinkedIn trouvé pour 2025.</p>)
                   : (
                     <ul class="list-vert">
-                      {liPosts.map((p: any) => (
-                        <li>
-                          <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" class="item" aria-label={`Ouvrir le post : ${p.title}`}>
-                            {p.imageUrl
-                              ? <img src={p.imageUrl} alt="" loading="lazy" width="64" height="64" style="flex:0 0 64px; width:64px; height:64px; object-fit:cover; border-radius:8px; background:#f6f6f6;" />
-                              : <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6; display:flex; align-items:center; justify-content:center; font-size:12px; color:#777;">LI</div>}
-                            <div style="min-width:0;">
-                              <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">{p.title}</div>
-                              <div style="opacity:.75; font-size:12px; margin-bottom:4px;">{new Date(p.date).toLocaleDateString('fr-FR')} · LinkedIn</div>
-                              <div style="font-size:13px; opacity:.9;">{truncate(p.summary, 140)}</div>
-                            </div>
-                          </a>
-                        </li>
-                      ))}
+                      {liPosts.map((p: any) => {
+                        const url = getUrl(p);
+                        const image = getImage(p);
+                        const summary = getSummary(p);
+                        return (
+                          <li>
+                            <a href={url} target="_blank" rel="noopener noreferrer" class="item" aria-label={`Ouvrir le post : ${p.title}`}>
+                              {image
+                                ? <img src={image} alt="" loading="lazy" width="64" height="64" style="flex:0 0 64px; width:64px; height:64px; object-fit:cover; border-radius:8px; background:#f6f6f6;" />
+                                : <div style="flex:0 0 64px; width:64px; height:64px; border-radius:8px; background:#f6f6f6; display:flex; align-items:center; justify-content:center; font-size:12px; color:#777;">LI</div>}
+                              <div style="min-width:0;">
+                                <div style="font-weight:600; line-height:1.25; margin-bottom:4px; font-size:14px;">{p.title}</div>
+                                <div style="opacity:.75; font-size:12px; margin-bottom:4px;">{p.date ? new Date(p.date).toLocaleDateString('fr-FR') : ''} · LinkedIn</div>
+                                <div style="font-size:13px; opacity:.9;">{truncate(summary, 140)}</div>
+                              </div>
+                            </a>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )
               }
