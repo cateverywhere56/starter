@@ -1,5 +1,5 @@
 // scripts/generate-linkedin-clearecondl.js
-/* v9 — 2025 full-year LI posts + guaranteed thumbnail + multi-engines
+/* v10 — +scrape profil(s) ciblé(s) (ex: Charles Nutting) avec filtres #clearecondl/CleaRecon DL/CleaReconDL en 2025
    Usage: node scripts/generate-linkedin-clearecondl.js
 */
 import fs from "fs";
@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 const OUT_DIR = path.join(__dirname, "..", "src", "content", "li-clearecondl");
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-// ---------- Config ----------
+/* ---------- Config ---------- */
 const YEAR = 2025;
 const KEYWORDS = [
   '"#cleareconDL"',
@@ -22,22 +22,29 @@ const KEYWORDS = [
   "CleaReconDL",
   "clearecon dl",
   "clearecondl",
-  "clearecon"
+  "clearecon",
+];
+
+// ⚠️ Profils à forcer (scrape direct des “recent activity”)
+const PROFILE_TARGETS = [
+  // transmis par l'utilisateur
+  "https://www.linkedin.com/in/charles-nutting-do-fsir-5b18b95a/",
+  // optionnel: variable d'env (séparée par des virgules)
+  ...(process.env.PROFILE_URLS ? process.env.PROFILE_URLS.split(",").map(s => s.trim()).filter(Boolean) : []),
 ];
 
 const HARD_TIMEOUT_MS = 20000;
-const PAUSE_MS = 1200; // douceur pour éviter le throttling
+const PAUSE_MS = 1200; // throttling douceur
 const HEADERS = [
-  // rotation UA simple
   { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36" },
   { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17 Safari/605.1.15" },
-  { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/123.0" }
+  { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/123.0" },
 ];
 
 const BING_KEY = process.env.AZURE_BING_KEY || "";
 const SERPAPI_KEY = process.env.SERPAPI_KEY || "";
 
-// ---------- Utils ----------
+/* ---------- Utils ---------- */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha1 = (s) => crypto.createHash("sha1").update(s).digest("hex");
 
@@ -54,7 +61,7 @@ function looksLinkedInPost(u) {
     const url = new URL(u);
     if (!/(\.|^)linkedin\.com$/i.test(url.hostname)) return false;
     const p = url.pathname;
-    return /\/feed\/update\/|\/posts\/|\/feed\/update\/urn:li:activity:|\/feed\/update\/urn%3Ali%3Aactivity%3A|activity\/|ugcPost\/|share\/|update\//i.test(p) || /urn%3Ali%3A(ugcPost|activity)%3A/i.test(url.href);
+    return /\/feed\/update\/|\/posts\/|activity\/|ugcPost\/|share\/|update\//i.test(p) || /urn%3Ali%3A(ugcPost|activity)%3A/i.test(url.href);
   } catch { return false; }
 }
 
@@ -63,8 +70,7 @@ function keyFromUrlOrUrn(urlStr, urn) {
   try {
     const u = new URL(urlStr);
     return `${u.origin}${u.pathname}`;
-  } catch { return urlStr;
-  }
+  } catch { return urlStr; }
 }
 
 function ensureAbsolute(imgUrl) {
@@ -114,10 +120,19 @@ function extractMeta(html) {
   // updateUrn si présent
   const urn = (html.match(/urn:li:(?:activity|ugcPost):\d+/i) || [])[0] || "";
   m.updateUrn = urn;
+
+  // 1re image media.licdn.com si pas d'og:image
   if (!m.image) {
     const mImg = html.match(/https?:\/\/media\.licdn\.com\/[^"' >]+/i);
     if (mImg) m.image = mImg[0];
   }
+  // date (essaie plusieurs patterns)
+  m.date =
+    (html.match(/datetime="(2025-[^"]+)"/i) || [])[1] ||
+    (html.match(/"datePublished"\s*:\s*"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] ||
+    (html.match(/"dateModified"\s*:\s*"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] ||
+    (html.match(/"publishedAt"\s*:\s*"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] ||
+    "";
   return m;
 }
 
@@ -127,12 +142,18 @@ function passesSemanticFilter(title, desc) {
     t.includes("clearecondl") ||
     t.includes("clearecon dl") ||
     t.includes("clea recon dl") ||
+    t.includes("#clearecondl") ||
     t.includes("clearecon")
   );
 }
 
+function isYearOK(dateStr) {
+  if (!dateStr) return true; // si inconnu, on garde (faute d'API)
+  const y = Number(String(dateStr).slice(0, 4));
+  return y === YEAR;
+}
+
 function fallbackAvatar(urlStr) {
-  // Essai de handle -> sinon host
   try {
     const u = new URL(urlStr);
     return `https://unavatar.io/host/${u.hostname}`;
@@ -178,9 +199,8 @@ function writeIfChanged(fp, content) {
   return true;
 }
 
-// ---------- Searchers ----------
+/* ---------- Searchers (SERP) ---------- */
 async function searchDuckDuckGo(q) {
-  // astuce: html lite
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`;
   const html = await getHTML(url);
   const links = [];
@@ -201,7 +221,6 @@ async function searchBingHTML(q) {
 }
 
 async function searchGoogleHTML(q) {
-  // avec plage de dates 2025
   const url = `https://www.google.com/search?q=${encodeURIComponent(q)}&tbs=cdr:1,cd_min:1/1/${YEAR},cd_max:12/31/${YEAR}`;
   const html = await getHTML(url);
   const links = [];
@@ -210,9 +229,11 @@ async function searchGoogleHTML(q) {
   while ((m = re.exec(html))) {
     const href = m[1];
     if (href.includes("/url?q=")) {
-      const u = new URL(href);
-      const real = u.searchParams.get("q");
-      if (real) links.push(real);
+      try {
+        const u = new URL(href);
+        const real = u.searchParams.get("q");
+        if (real) links.push(real);
+      } catch {}
     } else {
       links.push(href);
     }
@@ -238,7 +259,7 @@ async function searchSerpAPI(q) {
   return links;
 }
 
-async function gatherCandidates() {
+async function gatherCandidatesFromSERP() {
   const engines = [];
   if (SERPAPI_KEY) engines.push(async q => (await searchSerpAPI(q)));
   if (BING_KEY) engines.push(async q => (await searchBingAPI(q)));
@@ -254,7 +275,6 @@ async function gatherCandidates() {
       } catch {}
       await sleep(PAUSE_MS);
     }
-    // Variante : forcer 2025 dans la requête en plus
     for (const eng of engines) {
       try {
         const results = (await eng(`${kw} 2025 site:linkedin.com`)).slice(0, 50);
@@ -266,42 +286,114 @@ async function gatherCandidates() {
   return Array.from(urls);
 }
 
-// ---------- Main ----------
-(async () => {
-  const candidates = await gatherCandidates();
+/* ---------- Profil scraping ---------- */
+/** Construit les URLs “recent activity” d’un profil */
+function profileActivityPages(profileUrl) {
+  // normalise /in/xxx/
+  const base = profileUrl.replace(/(\?|#).*$/, "").replace(/\/+$/, "") + "/";
+  return [
+    base + "recent-activity/all/",
+    base + "recent-activity/shares/",
+    base + "recent-activity/posts/",
+  ];
+}
 
+/** Extrait des URLs de posts LI depuis la page recent-activity */
+function extractPostLinksFromActivityHTML(html) {
+  const links = new Set();
+
+  // liens bruts “/feed/update/urn:li:activity:XXXXXXXXXXXX”
+  const reUpdate = /https?:\/\/www\.linkedin\.com\/feed\/update\/[^\s"'<>]+/ig;
+  let m;
+  while ((m = reUpdate.exec(html))) links.add(m[0]);
+
+  // liens “/posts/...” (format “créateur/posts/...”)
+  const rePosts = /https?:\/\/www\.linkedin\.com\/posts\/[^\s"'<>]+/ig;
+  while ((m = rePosts.exec(html))) links.add(m[0]);
+
+  // liens encodés “urn%3Ali%3Aactivity%3A...”
+  const reUrnEnc = /https?:\/\/www\.linkedin\.com\/feed\/update\/[^\s"'<>]*urn%3Ali%3Aactivity%3A\d+/ig;
+  while ((m = reUrnEnc.exec(html))) links.add(m[0]);
+
+  return Array.from(links).filter(looksLinkedInPost);
+}
+
+/** Va chercher tous les posts d'un profil (via pages recent-activity), puis filtre par mots-clés */
+async function gatherCandidatesFromProfiles() {
+  const urls = new Set();
+  for (const profile of PROFILE_TARGETS) {
+    const pages = profileActivityPages(profile);
+    for (const p of pages) {
+      try {
+        const html = await getHTML(p);
+        if (!html) continue;
+        const links = extractPostLinksFromActivityHTML(html);
+        links.forEach(u => urls.add(u));
+      } catch {}
+      await sleep(PAUSE_MS);
+    }
+  }
+  return Array.from(urls);
+}
+
+/* ---------- Pipeline Post ---------- */
+function textForFilter(meta, html) {
+  // parfois og:title/desc sont creux ; on concatène un échantillon brut
+  const raw = (html || "").replace(/\s+/g, " ").slice(0, 2000);
+  return `${meta.title || ""} ${meta.description || ""} ${raw}`;
+}
+
+async function processURL(url, sourceEngine = "multi") {
+  const html = await getHTML(url);
+  if (!html) return null;
+
+  const meta = extractMeta(html);
+  const text = textForFilter(meta, html);
+  if (!passesSemanticFilter(meta.title, text)) return null;
+  if (!isYearOK(meta.date)) return null;
+
+  const u = new URL(url);
+  const item = {
+    title: meta.title?.trim() || "(Sans titre)",
+    description: meta.description?.trim() || "",
+    date: meta.date || new Date().toISOString(),
+    url,
+    origin: u.origin,
+    pathname: u.pathname,
+    host: u.hostname,
+    image: meta.image || fallbackAvatar(url),
+    updateUrn: meta.updateUrn || undefined,
+    sourceEngine,
+  };
+  return item;
+}
+
+/* ---------- Main ---------- */
+(async () => {
+  const candidatesSet = new Set();
+
+  // 1) SERP (moteurs)
+  const serp = await gatherCandidatesFromSERP();
+  serp.forEach(u => candidatesSet.add(u));
+
+  // 2) Profils ciblés (ex: Charles Nutting)
+  const fromProfiles = await gatherCandidatesFromProfiles();
+  fromProfiles.forEach(u => candidatesSet.add(u));
+
+  // Pipeline
+  const candidates = Array.from(candidatesSet);
   const seenKeys = new Set();
-  let created = 0, updated = 0, kept = 0;
+  let created = 0, updated = 0, kept = 0, matched = 0;
 
   for (const url of candidates) {
     try {
-      const html = await getHTML(url);
-      if (!html) continue;
+      const item = await processURL(url, "multi+profile");
+      if (!item) { continue; }
+      matched++;
 
-      const meta = extractMeta(html);
-      const title = meta.title?.trim() || "";
-      const description = meta.description?.trim() || "";
-
-      if (!passesSemanticFilter(title, description)) continue;
-
-      const urn = meta.updateUrn || "";
-      const key = keyFromUrlOrUrn(url, urn);
+      const key = keyFromUrlOrUrn(item.url, item.updateUrn);
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);
-
-      const u = new URL(url);
-      const item = {
-        title: title || "(Sans titre)",
-        description,
-        date: new Date().toISOString(), // Date de collecte (LI n’expose pas toujours la date)
-        url,
-        origin: u.origin,
-        pathname: u.pathname,
-        host: u.hostname,
-        image: meta.image || fallbackAvatar(url),
-        updateUrn: urn || undefined,
-        sourceEngine: "multi"
-      };
 
       const md = frontmatter(item);
       const fp = mdPathFor(item);
@@ -311,10 +403,10 @@ async function gatherCandidates() {
       else if (existed && changed) updated++;
       else kept++;
     } catch {
-      // ignore & continue
+      // ignore et continue
     }
     await sleep(PAUSE_MS);
   }
 
-  console.log(`LinkedIn 2025 — candidats: ${candidates.length}, créés: ${created}, maj: ${updated}, inchangés: ${kept}`);
+  console.log(`LinkedIn 2025 — candidats totaux: ${candidates.length}, pertinents: ${matched}, créés: ${created}, maj: ${updated}, inchangés: ${kept}`);
 })();
