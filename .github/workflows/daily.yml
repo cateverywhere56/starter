@@ -43,19 +43,44 @@ jobs:
       - name: Generate CleaReconDL (left column)
         run: npm run generate:clearecondl
 
-      # 👉 Colonne droite 1 : GE HealthCare vidéos 2025 (filtrées CleaRecon)
+      # 👉 Colonne droite 1 : GE HealthCare vidéos 2025 (filtrées)
       - name: Generate GE HealthCare videos (2025)
         run: npm run generate:gehc2025
         env:
-          # (facultatif mais recommandé pour couvrir toute l'année 2025)
-          YT_API_KEY: ${{ secrets.YT_API_KEY }}
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}   # requis pour l'appel API
 
-      # 👉 Colonne droite 2 : LinkedIn posts CleaReconDL
-      - name: Generate LinkedIn posts (CleaReconDL)
+      # 👉 Colonne droite 2 (pass 1) : LinkedIn — profil ciblé (debug)
+      #    - Scrape uniquement les profils (pas de SERP)
+      #    - Logs verbeux + HTML sauvegardé dans .cache/li/
+      #    - Throttle plus lent pour limiter les blocages
+      - name: Generate LinkedIn posts (profile-focused debug)
+        run: node scripts/generate-linkedin-clearecondl.js
+        env:
+          LOG_LEVEL: debug
+          DEBUG_SAVE_HTML: "1"
+          PROFILE_ONLY: "1"
+          PAUSE_MS: "1800"
+          PROFILE_URLS: "https://www.linkedin.com/in/charles-nutting-do-fsir-5b18b95a/"
+          # (optionnel) tu peux ajouter d'autres profils, séparés par des virgules
+          # PROFILE_URLS: "https://www.linkedin.com/in/charles-nutting-do-fsir-5b18b95a/,https://www.linkedin.com/in/foo/"
+
+      # 👉 (facultatif mais utile) Publier l'artifact debug si présent
+      - name: Upload LinkedIn debug HTML (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: li-debug-html
+          path: .cache/li
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # 👉 Colonne droite 2 (pass 2) : LinkedIn — collecte standard (SERP + profils)
+      #    - Utilise les clés si elles existent (API Bing / SerpAPI)
+      - name: Generate LinkedIn posts (CleaReconDL — full)
         run: npm run generate:li-clearecondl
         env:
-          AZURE_BING_KEY: ${{ secrets.AZURE_BING_KEY }}   # 🔑 Clé Bing Web Search API v7
-          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}         # 🔑 (optionnel) Clé SerpAPI
+          AZURE_BING_KEY: ${{ secrets.AZURE_BING_KEY }}   # 🔑 Bing Web Search API v7 (optionnel mais recommandé)
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}         # 🔑 SerpAPI (optionnel)
 
       # 🔎 Diagnostics : vérifie les fichiers générés
       - name: Debug counts
@@ -82,7 +107,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: add news $(date -u +'%Y-%m-%d %H:%M') [skip ci]"
+            git commit -m "chore: content update $(date -u +'%Y-%m-%d %H:%M') [skip ci]"
             git push
           fi
 
