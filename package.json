@@ -12,8 +12,6 @@
     "generate:gehc2025": "node scripts/generate-gehealthcare-2025.js",
     "generate:all": "npm run generate && npm run generate:clearecondl && npm run generate:gehc2025",
     "generate:li-clearecondl": "node scripts/generate-linkedin-clearecondl.js",
-
-    /* --- Debug LinkedIn --- */
     "li:debug": "cross-env LOG_LEVEL=debug DEBUG_SAVE_HTML=1 PROFILE_ONLY=1 node scripts/generate-linkedin-clearecondl.js",
     "li:profile": "cross-env PROFILE_URLS=\"https://www.linkedin.com/in/charles-nutting-do-fsir-5b18b95a/\" LOG_LEVEL=debug PROFILE_ONLY=1 node scripts/generate-linkedin-clearecondl.js",
     "li:slow": "cross-env PAUSE_MS=1800 LOG_LEVEL=debug PROFILE_ONLY=1 node scripts/generate-linkedin-clearecondl.js"
