@@ -49,31 +49,13 @@ jobs:
         env:
           YT_API_KEY: ${{ secrets.YT_API_KEY }}   # requis pour l'appel API
 
-      # 👉 Colonne droite 2 (pass 1) : LinkedIn — SERP HTML only (Google + DDG)
+      # 👉 Colonne droite 2 : LinkedIn — SERP HTML (Google + DDG), sans profil
       - name: Generate LinkedIn posts (SERP HTML only)
         run: node scripts/generate-linkedin-clearecondl.js
         env:
           LOG_LEVEL: debug
-          PROFILE_ONLY: "0"   # active la recherche SERP (HTML), pas de profil direct
+          PROFILE_ONLY: "0"   # active la SERP et ignore les pages profil (451)
           PAUSE_MS: "1400"
-
-      # 👉 (facultatif mais utile) Publier l'artifact debug si présent
-      - name: Upload LinkedIn debug HTML (if any)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: li-debug-html
-          path: .cache/li
-          if-no-files-found: ignore
-          retention-days: 7
-
-      # 👉 Colonne droite 2 (pass 2) : LinkedIn — collecte standard (SERP + profils)
-      #    - Utilise les clés si elles existent (API Bing / SerpAPI), sinon fallback HTML
-      - name: Generate LinkedIn posts (CleaReconDL — full)
-        run: npm run generate:li-clearecondl
-        env:
-          AZURE_BING_KEY: ${{ secrets.AZURE_BING_KEY }}   # optionnel
-          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}         # optionnel
 
       # 🔎 Diagnostics : vérifie les fichiers générés
       - name: Debug counts
