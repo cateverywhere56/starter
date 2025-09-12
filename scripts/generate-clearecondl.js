@@ -24,11 +24,6 @@ const KEY_QUERIES = [
 
 const LINKEDIN_PEOPLE = [
   "Charles Nutting",
-  "Philip Rackliff",
-  "Helene Zemb",
-  "Benjamin Wimille",
-  "Celine Lilonni",
-  "Ashley Brown Harrison",
   "Ioanne Cartier",
 ];
 
