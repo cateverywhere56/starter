@@ -1,7 +1,8 @@
 // scripts/generate-linkedin-clearecondl.js
-/* v13 — SERP Google HTML only → posts LinkedIn
-   - Cherche via Google (HTML) des URLs de posts LI contenant CleaRecon DL
-   - Extrait: profileName + postText (+ image, date, updateUrn)
+/* v14 — SERP HTML (DuckDuckGo + Yahoo) → posts LinkedIn
+   - Sans Google, sans profils "recent-activity" (évite 451)
+   - Cherche des URLs de posts LI avec les mots-clés CleaRecon
+   - Extrait: profileName + postText + (image, date, updateUrn)
    - Écrit des .md dans src/content/li-clearecondl/
    Usage: node scripts/generate-linkedin-clearecondl.js
 */
@@ -12,7 +13,7 @@ import { fileURLToPath } from "url";
 import fetch from "node-fetch";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
 
 const OUT_DIR = path.join(__dirname, "..", "src", "content", "li-clearecondl");
 fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -30,7 +31,7 @@ const KEY_TERMS = [
 
 const HARD_TIMEOUT_MS = 20000;
 const PAUSE_MS = 1200;
-const UAS = [
+const HEADERS = [
   { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36", "Accept-Language": "en-US,en;q=0.9,fr;q=0.8" },
   { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17 Safari/605.1.15", "Accept-Language": "en-US,en;q=0.9,fr;q=0.8" },
   { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/123.0", "Accept-Language": "en-US,en;q=0.9,fr;q=0.8" }
@@ -38,8 +39,9 @@ const UAS = [
 
 /* ---------- Utils ---------- */
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const sha1 = (s) => crypto.createHash("sha1").update(s).digest("hex");
-const norm = (s="") => s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu,"").replace(/\s+/g," ").trim();
+const sha1  = (s) => crypto.createHash("sha1").update(s).digest("hex");
+const norm  = (s="") => s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu,"").replace(/\s+/g," ").trim();
+
 const containsClea = (txt="") => {
   const t = norm(txt);
   return (
@@ -64,83 +66,94 @@ function ensureAbs(img) {
   return null;
 }
 
-async function fetchText(url, uaIndex=0) {
-  const headers = UAS[uaIndex % UAS.length];
+async function fetchText(url, i=0) {
+  const h = HEADERS[i % HEADERS.length];
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), HARD_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { headers, signal: ctrl.signal });
+    const res = await fetch(url, { headers: h, signal: ctrl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.text();
   } finally { clearTimeout(to); }
 }
 
 async function getHTML(rawUrl) {
-  // Utilise r.jina.ai pour éviter consent & JS
+  // Proxy statique via r.jina.ai (pas de JS/consent)
   const proxied = rawUrl.replace(/^https?:\/\//, (m) => `https://r.jina.ai/${m}`);
-  for (let i=0;i<UAS.length;i++) {
+  for (let i=0;i<HEADERS.length;i++) {
     try {
       const txt = await fetchText(proxied, i);
       if (txt && txt.length > 200) return txt;
-    } catch {
-      await sleep(300);
-    }
+    } catch { await sleep(300); }
   }
   return "";
 }
 
-/* ---------- Google SERP (HTML) ---------- */
-async function searchGoogleHTML(query) {
-  // bornage temporel à YEAR
-  const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbs=cdr:1,cd_min:1/1/${YEAR},cd_max:12/31/${YEAR}`;
+/* ---------- SERP HTML (DuckDuckGo + Yahoo) ---------- */
+async function ddgSearch(q) {
+  // version HTML lite
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`;
   const html = await getHTML(url);
-  const out = [];
-  const re = /<a href="(https?:\/\/[^"]+)"[^>]*>(?:<h3|<span)/ig;
-  let m;
-  while ((m = re.exec(html))) {
-    const href = m[1];
-    if (href.includes("/url?q=")) {
-      try {
-        const u = new URL(href);
-        const real = u.searchParams.get("q");
-        if (real) out.push(real);
-      } catch {}
-    } else {
-      out.push(href);
-    }
-  }
-  // Nettoie
-  const uniq = Array.from(new Set(out));
-  return uniq.filter(looksLinkedInPost);
+  const links = [];
+  const re = /<a[^>]+class="result__a"[^>]+href="([^"]+)"/ig;
+  let m; while ((m = re.exec(html))) links.push(m[1]);
+  return links;
+}
+
+async function yahooSearch(q) {
+  const url = `https://search.yahoo.com/search?p=${encodeURIComponent(q)}`;
+  const html = await getHTML(url);
+  const links = [];
+  // Capte les liens de résultats principaux
+  const re = /<h3[^>]*>\s*<a[^>]+href="([^"]+)"/ig;
+  let m; while ((m = re.exec(html))) links.push(m[1]);
+  return links;
 }
 
 async function gatherCandidates() {
   const queries = [];
-  // queries génériques
+
+  // cibler les formats de posts
   KEY_TERMS.forEach(term => {
     queries.push(`${term} site:linkedin.com/posts`);
     queries.push(`${term} site:linkedin.com/feed/update`);
     queries.push(`${term} site:linkedin.com`);
   });
-  // variante explicite “2025” (au cas où le tbs cdr ne suffise pas)
+
+  // variantes 2025 au cas où
   KEY_TERMS.forEach(term => {
     queries.push(`${term} 2025 site:linkedin.com`);
+    queries.push(`${term} 2025 site:linkedin.com/posts`);
+    queries.push(`${term} 2025 site:linkedin.com/feed/update`);
   });
+
+  const engines = [
+    { name: "ddg", fn: ddgSearch },
+    { name: "yahoo", fn: yahooSearch }
+  ];
 
   const urls = new Set();
   for (const q of queries) {
-    try {
-      const res = await searchGoogleHTML(q);
-      res.forEach(u => urls.add(u));
-    } catch {}
-    await sleep(PAUSE_MS);
+    for (const eng of engines) {
+      try {
+        const res = (await eng.fn(q)).slice(0, 50);
+        const good = res.filter(looksLinkedInPost);
+        good.forEach(u => urls.add(u));
+        console.log(`[DEBUG] SERP ${eng.name} "${q}" -> ${good.length}/${res.length}`);
+      } catch (e) {
+        console.log(`[DEBUG] SERP ${eng.name} error for "${q}": ${e.message}`);
+      }
+      await sleep(PAUSE_MS);
+    }
   }
-  return Array.from(urls);
+
+  const out = Array.from(urls);
+  console.log(`[INFO] SERP: ${out.length} URL(s) candidates.`);
+  return out;
 }
 
-/* ---------- Extraction post LI ---------- */
+/* ---------- Extraction depuis une page de post LI ---------- */
 function extractFromHTML(html) {
-  // métas
   const grab = (name) => {
     const re = new RegExp(`<meta[^>]+property=["']${name}["'][^>]+content=["']([^"']+)["']`, "i");
     const re2= new RegExp(`<meta[^>]+name=["']${name}["'][^>]+content=["']([^"']+)["']`, "i");
@@ -157,26 +170,20 @@ function extractFromHTML(html) {
   const updateUrn = (html.match(/urn:li:(?:activity|ugcPost):\d+/i) || [])[0] || "";
   const date =
     (html.match(/datetime="(2025-[^"]+)"/i) || [])[1] ||
-    (html.match(/"datePublished"\s*:\s*"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] ||
-    (html.match(/"dateModified"\s*:\s*"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] ||
-    (html.match(/"publishedAt"\s*:\s*"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] ||
-    "";
+    (html.match(/"datePublished" *: *"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] ||
+    (html.match(/"dateModified" *: *"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] ||
+    (html.match(/"publishedAt" *: *"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] || "";
 
-  // Heuristique nom profil (souvent "Name on LinkedIn: …")
+  // Nom du profil
   let profileName = "";
-  const m1 = ogTitle.match(/^(.+?) on LinkedIn/i);
+  const tTitle = (html.match(/<title[^>]*>([^<]+)<\/title>/i) || [])[1] || "";
+  const m1 = (ogTitle || tTitle).match(/^(.+?) on LinkedIn/i);
   if (m1) profileName = m1[1].trim();
-  // autre fallback: balise title classique "Name on LinkedIn: …"
-  if (!profileName) {
-    const t = (html.match(/<title[^>]*>([^<]+)<\/title>/i) || [])[1] || "";
-    const m2 = t.match(/^(.+?) on LinkedIn/i);
-    if (m2) profileName = m2[1].trim();
-  }
-  // Texte du post: og:description, sinon un extrait brut
+
+  // Texte du post
   let postText = ogDesc;
   if (!postText) {
     const body = html.replace(/\s+/g, " ");
-    // essaie de capturer un bout de phrase après "says" / “”
     const qm = body.match(/“([^”]{20,280})”/);
     if (qm) postText = qm[1];
   }
@@ -209,13 +216,12 @@ function fm(o) {
     ["updateUrn", o.updateUrn || null],
     ["profileName", o.profileName || null],
     ["postText", o.postText || null],
-    ["source", "google-serp"]
+    ["source", "serp-html"]
   ]
   .filter(([,v]) => v !== undefined && v !== null && v !== "")
   .map(([k,v]) => `${k}: ${JSON.stringify(v)}`)
   .join("\n");
 
-  // description = postText (pour être affiché dans index.astro qui lit summary/description)
   const desc = o.postText || o.description || "";
   return `---\n${yaml}\n---\n\n${desc}\n`;
 }
@@ -243,24 +249,22 @@ function writeIfChanged(fp, content) {
   console.time("li");
   try {
     const candidates = await gatherCandidates();
-    console.log(`[INFO] SERP: ${candidates.length} URL(s) candidates.`);
 
     const seen = new Set();
     let created=0, updated=0, kept=0, matched=0;
 
-    for (const [i,url] of candidates.entries()) {
+    for (const url of candidates) {
       try {
         const html = await getHTML(url);
-        if (!html) { continue; }
+        if (!html) continue;
 
-        // Filtre sémantique global pour éviter le bruit
+        // Filtre sémantique dès la page (évite le bruit)
         if (!containsClea(html)) continue;
 
         const meta = extractFromHTML(html);
-        // re-filtre sur texte + ogDesc aussi
-        if (!containsClea(`${meta.ogTitle} ${meta.postText} ${meta.ogDesc}`)) continue;
+        if (!containsClea(`${meta.ogTitle} ${meta.ogDesc} ${meta.postText}`)) continue;
 
-        // bornage année si on a la date
+        // Bornage année si on a une date
         if (meta.date && !String(meta.date).startsWith(String(YEAR))) continue;
 
         const u = new URL(url);
@@ -286,10 +290,12 @@ function writeIfChanged(fp, content) {
         const fp = mdPath(item);
         const existed = fs.existsSync(fp);
         const changed = writeIfChanged(fp, content);
+
         if (!existed && changed) { created++; console.log(`[INFO] CREATED: ${fp}`); }
         else if (existed && changed) { updated++; console.log(`[INFO] UPDATED: ${fp}`); }
         else { kept++; }
         matched++;
+
         await sleep(PAUSE_MS);
       } catch {
         // ignore & continue
