@@ -35,6 +35,10 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      # ➕ On installe Puppeteer pour ce run (sans modifier le lockfile)
+      - name: Install Puppeteer (runtime only)
+        run: npm i puppeteer@22 --no-save
+
       # 👉 Génération des contenus (colonne principale)
       - name: Generate news (papers)
         run: npm run generate
@@ -49,13 +53,9 @@ jobs:
         env:
           YT_API_KEY: ${{ secrets.YT_API_KEY }}   # requis pour l'appel API
 
-      # 👉 Colonne droite 2 : LinkedIn — SERP HTML (Google + DDG), sans profil
-      - name: Generate LinkedIn posts (SERP HTML only)
+      # 👉 Colonne droite 2 : LinkedIn — via Google (Puppeteer)
+      - name: Generate LinkedIn posts (Puppeteer Google)
         run: node scripts/generate-linkedin-clearecondl.js
-        env:
-          LOG_LEVEL: debug
-          PROFILE_ONLY: "0"   # active la SERP et ignore les pages profil (451)
-          PAUSE_MS: "1400"
 
       # 🔎 Diagnostics : vérifie les fichiers générés
       - name: Debug counts
