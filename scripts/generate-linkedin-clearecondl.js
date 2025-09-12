@@ -341,6 +341,8 @@ async function ddgDiscover(browser, queries) {
 
     const candidates = Array.from(all);
     console.log(`[INFO] SERP: ${candidates.length} URL(s) candidates.`);
+    candidates.forEach((u, i) => console.log(`CANDIDATE[${String(i+1).padStart(2,"0")}]: ${u}`));
+    
 
     // 3) Hydrate + filtre + écrit
     const seen = new Set();
