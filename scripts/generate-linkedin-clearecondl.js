@@ -1,5 +1,9 @@
 // scripts/generate-linkedin-clearecondl.js
-// v19 — Puppeteer multi-SERP (Google → Startpage → DDG) + extraction LI via r.jina.ai
+// v20 — Puppeteer multi-SERP (Google → Startpage → DDG) + extraction LI via r.jina.ai
+// Correctifs appliqués : (2) slug unique, (3) détection LI plus robuste,
+// (4) filtre "clea recon dl" plus strict, (5) parsing date plus fiable,
+// (6) jitter anti-throttling + backoff sur getHTML.
+//
 // Prérequis CI: une étape "npm i puppeteer@22 --no-save"
 // Usage: node scripts/generate-linkedin-clearecondl.js
 
@@ -40,24 +44,24 @@ const UA =
 
 /* ---------- Utils ---------- */
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const jitter = (ms) => ms + Math.floor(Math.random() * ms * 0.5); // (6) jitter anti-throttling
 const sha1  = (s) => crypto.createHash("sha1").update(s).digest("hex");
 const norm  = (s="") => s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu,"").replace(/\s+/g," ").trim();
 
-const containsClea = (txt="") => {
-  const t = norm(txt);
-  return (
-    t.includes("clearecondl") || t.includes("clea recon dl") ||
-    t.includes("#clearecondl") || t.includes("clearecon dl") || t.includes("clearecon")
-  );
-};
+// (4) Filtre plus strict des mentions CleaRecon DL
+const CLEA_PAT = /\bclea\s*recon\s*dl\b|#?clearecondl\b|#?clearecon\b/i;
+const containsClea = (txt="") => CLEA_PAT.test(norm(txt));
 
-function looksLinkedInPost(u) {
+function looksLinkedInPost(u) { // (3) détection LI plus robuste
   try {
     const url = new URL(u);
     if (!/(\.|^)linkedin\.com$/i.test(url.hostname)) return false;
+    const href = decodeURIComponent(url.href);
     const p = url.pathname;
-    return /\/feed\/update\/|\/posts\/|activity\/|ugcPost\/|share\/|update\//i.test(p) ||
-           /urn%3Ali%3A(ugcPost|activity)%3A/i.test(url.href);
+    const postPath = /\/feed\/update\/|\/posts\/|activity\/|ugcPost\/|share\/|update\//i.test(p);
+    const encodedUrn = /urn%3Ali%3A(?:ugcPost|activity)%3A/i.test(href);
+    const recentActivity = /\/in\/[^/]+\/recent-activity\/all/i.test(p);
+    return postPath || encodedUrn || recentActivity;
   } catch { return false; }
 }
 
@@ -74,13 +78,18 @@ function keyFrom(urlStr, urn) {
   catch { return (urlStr || "").toLowerCase(); }
 }
 
+// (2) Slugs uniques : ajoute un suffixe hash si collision de fichier
 function mdPath(o) {
   const d = new Date(o.date || Date.now());
   const y = d.getFullYear();
   const m = String(d.getMonth()+1).padStart(2,"0");
   const day = String(d.getDate()).padStart(2,"0");
-  const slug = (norm(o.title).replace(/[^a-z0-9\- ]/g,"").replace(/\s+/g,"-").slice(0,80)) || sha1(o.url).slice(0,8);
-  return path.join(OUT_DIR, `${y}-${m}-${day}-${slug}.md`);
+  const base = (norm(o.title).replace(/[^a-z0-9\- ]/g,"").replace(/\s+/g,"-").slice(0,80)) || sha1(o.url).slice(0,8);
+  const core = `${y}-${m}-${day}-${base}`;
+  const make = (suffix="") => path.join(OUT_DIR, `${core}${suffix}.md`);
+  const first = make();
+  if (!fs.existsSync(first)) return first;
+  return make("-" + sha1(o.url).slice(0,6));
 }
 
 function fm(o) {
@@ -121,15 +130,38 @@ async function fetchText(url) {
     return await res.text();
   } finally { clearTimeout(to); }
 }
-async function getHTML(rawUrl) {
+
+// (6) backoff sur getHTML
+async function getHTML(rawUrl, retries = 2) {
   const proxied = rawUrl.replace(/^https?:\/\//, (m) => `https://r.jina.ai/${m}`);
-  try {
-    const t = await fetchText(proxied);
-    return t || "";
-  } catch {
-    return "";
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const t = await fetchText(proxied);
+      if (t) return t;
+    } catch (e) {
+      if (i === retries) return "";
+      await sleep(500 * (2 ** i));
+    }
   }
+  return "";
 }
+
+// (5) extraction de date robuste multi-patterns
+function extractDate(html) {
+  const pats = [
+    /datetime="(20\d{2}-\d{2}-\d{2}[^"]*)"/i,
+    /"datePublished"\s*:\s*"([^"]+)"/i,
+    /"dateModified"\s*:\s*"([^"]+)"/i,
+    /content=["'](20\d{2}-\d{2}-\d{2}T[^"']+)["'][^>]*property=["']article:published_time["']/i,
+    /itemprop=["']datePublished["'][^>]*content=["']([^"']+)["']/i
+  ];
+  for (const re of pats) {
+    const m = html.match(re);
+    if (m) return m[1];
+  }
+  return "";
+}
+
 function extractFromHTML(html) {
   const grab = (name) => {
     const re  = new RegExp(`<meta[^>]+property=["']${name}["'][^>]+content=["']([^"']+)["']`, "i");
@@ -139,17 +171,13 @@ function extractFromHTML(html) {
 
   const ogTitle = grab("og:title") || (html.match(/<title[^>]*>([^<]+)<\/title>/i)||[])[1] || "";
   const ogDesc  = grab("og:description") || grab("description") || "";
-  let image     = ensureAbs(grab("og:image") || grab("twitter:image"));
+  let image     = ensureAbs(grab("og:image") || grab("og:image:secure_url") || grab("twitter:image")); // (5) + secure_url
   if (!image) {
     const m = html.match(/https?:\/\/media\.licdn\.com\/[^"' >]+/i);
     if (m) image = m[0];
   }
   const updateUrn = (html.match(/urn:li:(?:activity|ugcPost):\d+/i) || [])[0] || "";
-  const date =
-    (html.match(/datetime="(2025-[^"]+)"/i) || [])[1] ||
-    (html.match(/"datePublished"\s*:\s*"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] ||
-    (html.match(/"dateModified"\s*:\s*"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] ||
-    (html.match(/"publishedAt"\s*:\s*"(\d{4}-\d{2}-\d{2}[^"]*)"/i) || [])[1] || "";
+  const date = extractDate(html); // (5)
 
   let profileName = "";
   const titleLike = ogTitle || (html.match(/<title[^>]*>([^<]+)<\/title>/i)||[])[1] || "";
@@ -159,7 +187,7 @@ function extractFromHTML(html) {
   let postText = ogDesc;
   if (!postText) {
     const body = html.replace(/\s+/g, " ");
-    const qm = body.match(/“([^”]{20,280})”/);
+    const qm = body.match(/[“"](.{20,300}?)[”"]/); // (5) fenêtre plus large + guillemets droits
     if (qm) postText = qm[1];
   }
   return { ogTitle, ogDesc, image, updateUrn, date, profileName, postText };
@@ -214,7 +242,8 @@ async function extractGoogleLinks(page) {
       if (!href) continue;
       if (href.includes("linkedin.com") &&
           (/\/feed\/update\/|\/posts\/|activity\/|ugcPost\/|share\/|update\//i.test(href) ||
-           /urn%3Ali%3A(ugcPost|activity)%3A/i.test(href))) {
+           /urn%3Ali%3A(ugcPost|activity)%3A/i.test(href) ||
+           /\/in\/[^/]+\/recent-activity\/all/i.test(href))) {
         out.add(href.split("#")[0]);
       }
     }
@@ -235,7 +264,7 @@ async function googleDiscover(browser, queries) {
         await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(()=>{});
         const found = await extractGoogleLinks(page);
         found.forEach(u => urls.add(u));
-        await sleep(SERP_PAUSE_MS);
+        await sleep(jitter(SERP_PAUSE_MS)); // (6)
       }
     }
   }
@@ -267,7 +296,7 @@ async function startpageDiscover(browser, queries) {
       await page.goto(buildStartpageUrl(q, p), { waitUntil: "domcontentloaded", timeout: 60000 }).catch(()=>{});
       const found = await extractStartpageLinks(page);
       found.forEach(u => urls.add(u));
-      await sleep(SERP_PAUSE_MS);
+      await sleep(jitter(SERP_PAUSE_MS)); // (6)
     }
   }
   await page.close().catch(()=>{});
@@ -296,7 +325,7 @@ async function ddgDiscover(browser, queries) {
     await page.goto(buildDDGUrl(q), { waitUntil: "domcontentloaded", timeout: 60000 }).catch(()=>{});
     const found = await extractDDGLinks(page);
     found.forEach(u => urls.add(u));
-    await sleep(SERP_PAUSE_MS);
+    await sleep(jitter(SERP_PAUSE_MS)); // (6)
   }
   await page.close().catch(()=>{});
   return Array.from(urls);
@@ -304,7 +333,7 @@ async function ddgDiscover(browser, queries) {
 
 /* ---------- Main ---------- */
 (async () => {
-  console.time("linkedin-puppeteer-v19");
+  console.time("linkedin-puppeteer-v20");
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-dev-shm-usage", "--lang=en-US,en"]
@@ -317,7 +346,7 @@ async function ddgDiscover(browser, queries) {
       queries.push(`${term} site:linkedin.com/posts`);
       queries.push(`${term} site:linkedin.com/feed/update`);
       queries.push(`${term} site:linkedin.com`);
-      queries.push(`${term} 2025 site:linkedin.com`);
+      queries.push(`${term} ${YEAR} site:linkedin.com`);
     });
     // Ciblage profil demandé
     KEY_TERMS.forEach(term => {
@@ -350,7 +379,7 @@ async function ddgDiscover(browser, queries) {
 
     for (const url of candidates) {
       try {
-        const html = await getHTML(url);
+        const html = await getHTML(url); // (6) retry+backoff
         if (!html) continue;
 
         if (!containsClea(html)) continue;
@@ -381,7 +410,7 @@ async function ddgDiscover(browser, queries) {
         seen.add(key);
 
         const content = fm(item);
-        const fp = mdPath(item);
+        const fp = mdPath(item); // (2) slugs uniques
         const existed = fs.existsSync(fp);
         const changed = writeIfChanged(fp, content);
 
@@ -389,7 +418,7 @@ async function ddgDiscover(browser, queries) {
         else if (existed && changed) { updated++; console.log(`[INFO] UPDATED: ${fp}`); }
         else { kept++; }
         matched++;
-        await sleep(250);
+        await sleep(jitter(250)); // (6) petit jitter aussi ici
       } catch (e) {
         console.log(`[DEBUG] process error ${url}: ${e.message}`);
       }
@@ -401,6 +430,6 @@ async function ddgDiscover(browser, queries) {
     process.exitCode = 1;
   } finally {
     await browser.close().catch(()=>{});
-    console.timeEnd("linkedin-puppeteer-v19");
+    console.timeEnd("linkedin-puppeteer-v20");
   }
 })();
