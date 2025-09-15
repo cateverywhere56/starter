@@ -2,7 +2,7 @@ name: Daily Paper du jour
 
 on:
   schedule:
-    - cron: '*/30 * * * *'   # toutes les 30 minutes (UTC)
+    - cron: '*/60 * * * *'   # toutes les 30 minutes (UTC)
   workflow_dispatch: {}
   push:
     branches: [ main ]
