@@ -1,11 +1,21 @@
 // scripts/generate-linkedin-clearecondl.js
-// v20 — Puppeteer multi-SERP (Google → Startpage → DDG) + extraction LI via r.jina.ai
-// Correctifs appliqués : (2) slug unique, (3) détection LI plus robuste,
-// (4) filtre "clea recon dl" plus strict, (5) parsing date plus fiable,
-// (6) jitter anti-throttling + backoff sur getHTML.
+// v21 — Multi-SERP (Google → Startpage → DDG) + extraction LinkedIn via r.jina.ai
 //
-// Prérequis CI: une étape "npm i puppeteer@22 --no-save"
+// Correctifs intégrés :
+// (2) Slug unique anti-collision
+// (3) Détection LinkedIn plus robuste (URN encodés, recent-activity)
+// (4) Filtre #clearecondl / clea recon dl plus strict
+// (5) Parsing date multi-patterns + og:image:secure_url
+// (6) Jitter anti-throttling + backoff/retry sur getHTML
+//
+// Garde-fous de durée/volume :
+// - MAX_CANDIDATES (par défaut 60) -> stop découverte dès seuil atteint
+// - MAX_RUNTIME_MS (par défaut 5 min) -> arrêt dur du crawling
+// - Timeouts Puppeteer abaissés à 25s
+//
+// Prérequis CI: "npm i puppeteer@22 --no-save"
 // Usage: node scripts/generate-linkedin-clearecondl.js
+// Tuning rapide : MAX_CANDIDATES=30 MAX_RUNTIME_MS=180000 MAX_SERP_PAGES=2 RESULTS_PER_PAGE=20 node scripts/generate-linkedin-clearecondl.js
 
 import fs from "fs";
 import path from "path";
@@ -33,10 +43,12 @@ const KEY_TERMS = [
 // Profil ciblé demandé
 const PROFILE_SLUG = "charles-nutting-do-fsir-5b18b95a";
 
-const MAX_PAGES_PER_QUERY = 4;      // pages SERP max / requête
-const RESULTS_PER_PAGE    = 50;     // Google "num"
-const SERP_PAUSE_MS       = 1000;   // délai anti throttling
+const MAX_PAGES_PER_QUERY = Number(process.env.MAX_SERP_PAGES) || 4;         // pages SERP max / requête
+const RESULTS_PER_PAGE    = Number(process.env.RESULTS_PER_PAGE) || 20;      // Google "num" (20 par défaut)
+const SERP_PAUSE_MS       = 1000;                                            // délai anti throttling
 const FETCH_TIMEOUT_MS    = 20000;
+const MAX_CANDIDATES      = Number(process.env.MAX_CANDIDATES) || 60;        // plafond d'URLs collectées
+const MAX_RUNTIME_MS      = Number(process.env.MAX_RUNTIME_MS) || 5*60*1000; // arrêt dur: 5 min
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -198,6 +210,8 @@ async function newPage(browser) {
   const page = await browser.newPage();
   await page.setUserAgent(UA);
   await page.setViewport({ width: 1280, height: 900 });
+  page.setDefaultNavigationTimeout(25000);
+  page.setDefaultTimeout(25000);
   return page;
 }
 
@@ -224,7 +238,7 @@ async function primeGoogleConsent(page) {
     domain: ".google.com",
     path: "/",
   });
-  await page.goto("https://www.google.com/ncr", { waitUntil: "domcontentloaded", timeout: 45000 }).catch(()=>{});
+  await page.goto("https://www.google.com/ncr", { waitUntil: "domcontentloaded" }).catch(()=>{});
 }
 async function extractGoogleLinks(page) {
   const links = await page.evaluate(() => {
@@ -251,7 +265,7 @@ async function extractGoogleLinks(page) {
   });
   return links.filter(looksLinkedInPost);
 }
-async function googleDiscover(browser, queries) {
+async function googleDiscover(browser, queries, guard) {
   const urls = new Set();
   const page = await newPage(browser);
   await primeGoogleConsent(page);
@@ -259,14 +273,18 @@ async function googleDiscover(browser, queries) {
   for (const q of queries) {
     for (const withDate of [false, true]) {
       for (let p = 0; p < MAX_PAGES_PER_QUERY; p++) {
+        if (guard.stop()) break;
         const start = p * RESULTS_PER_PAGE;
         const url = buildGoogleUrl(q, start, withDate);
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(()=>{});
+        await page.goto(url, { waitUntil: "domcontentloaded" }).catch(()=>{});
         const found = await extractGoogleLinks(page);
         found.forEach(u => urls.add(u));
+        if (guard.hit(urls.size)) break;
         await sleep(jitter(SERP_PAUSE_MS)); // (6)
       }
+      if (guard.stop() || guard.hit(urls.size)) break;
     }
+    if (guard.stop() || guard.hit(urls.size)) break;
   }
   await page.close().catch(()=>{});
   return Array.from(urls);
@@ -288,16 +306,19 @@ async function extractStartpageLinks(page) {
   });
   return links.filter(looksLinkedInPost);
 }
-async function startpageDiscover(browser, queries) {
+async function startpageDiscover(browser, queries, guard) {
   const urls = new Set();
   const page = await newPage(browser);
   for (const q of queries) {
     for (let p=1; p<=MAX_PAGES_PER_QUERY; p++) {
-      await page.goto(buildStartpageUrl(q, p), { waitUntil: "domcontentloaded", timeout: 60000 }).catch(()=>{});
+      if (guard.stop()) break;
+      await page.goto(buildStartpageUrl(q, p), { waitUntil: "domcontentloaded" }).catch(()=>{});
       const found = await extractStartpageLinks(page);
       found.forEach(u => urls.add(u));
+      if (guard.hit(urls.size)) break;
       await sleep(jitter(SERP_PAUSE_MS)); // (6)
     }
+    if (guard.stop() || guard.hit(urls.size)) break;
   }
   await page.close().catch(()=>{});
   return Array.from(urls);
@@ -318,13 +339,15 @@ async function extractDDGLinks(page) {
   });
   return links.filter(looksLinkedInPost);
 }
-async function ddgDiscover(browser, queries) {
+async function ddgDiscover(browser, queries, guard) {
   const urls = new Set();
   const page = await newPage(browser);
   for (const q of queries) {
-    await page.goto(buildDDGUrl(q), { waitUntil: "domcontentloaded", timeout: 60000 }).catch(()=>{});
+    if (guard.stop()) break;
+    await page.goto(buildDDGUrl(q), { waitUntil: "domcontentloaded" }).catch(()=>{});
     const found = await extractDDGLinks(page);
     found.forEach(u => urls.add(u));
+    if (guard.hit(urls.size)) break;
     await sleep(jitter(SERP_PAUSE_MS)); // (6)
   }
   await page.close().catch(()=>{});
@@ -333,13 +356,19 @@ async function ddgDiscover(browser, queries) {
 
 /* ---------- Main ---------- */
 (async () => {
-  console.time("linkedin-puppeteer-v20");
+  console.time("linkedin-puppeteer-v21");
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-dev-shm-usage", "--lang=en-US,en"]
   });
 
   try {
+    const startedAt = Date.now();
+    const guard = {
+      stop: () => (Date.now() - startedAt) > MAX_RUNTIME_MS,
+      hit: (size) => size >= MAX_CANDIDATES
+    };
+
     // 1) Construire les requêtes (génériques + ciblage profil)
     const queries = [];
     KEY_TERMS.forEach(term => {
@@ -357,27 +386,30 @@ async function ddgDiscover(browser, queries) {
 
     // 2) Découverte multi-SERP (Google → Startpage → DDG)
     const all = new Set();
-    const g = await googleDiscover(browser, queries);
+    const g = await googleDiscover(browser, queries, guard);
     g.forEach(u => all.add(u));
-    if (all.size === 0) {
-      const sp = await startpageDiscover(browser, queries);
+    if (all.size === 0 && !guard.stop()) {
+      const sp = await startpageDiscover(browser, queries, guard);
       sp.forEach(u => all.add(u));
     }
-    if (all.size === 0) {
-      const d = await ddgDiscover(browser, queries);
+    if (all.size === 0 && !guard.stop()) {
+      const d = await ddgDiscover(browser, queries, guard);
       d.forEach(u => all.add(u));
     }
 
     const candidates = Array.from(all);
     console.log(`[INFO] SERP: ${candidates.length} URL(s) candidates.`);
     candidates.forEach((u, i) => console.log(`CANDIDATE[${String(i+1).padStart(2,"0")}]: ${u}`));
-    
 
     // 3) Hydrate + filtre + écrit
     const seen = new Set();
     let created=0, updated=0, kept=0, matched=0;
 
     for (const url of candidates) {
+      if (guard.stop()) {
+        console.log("[INFO] Arrêt anticipé (MAX_RUNTIME_MS atteint)");
+        break;
+      }
       try {
         const html = await getHTML(url); // (6) retry+backoff
         if (!html) continue;
@@ -429,7 +461,7 @@ async function ddgDiscover(browser, queries) {
     console.error("[ERROR] Fatal:", e);
     process.exitCode = 1;
   } finally {
-    await browser.close().catch(()=>{});
-    console.timeEnd("linkedin-puppeteer-v20");
+    try { await browser.close(); } catch {}
+    console.timeEnd("linkedin-puppeteer-v21");
   }
 })();
