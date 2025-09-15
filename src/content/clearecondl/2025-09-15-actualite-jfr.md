@@ -1,16 +1,16 @@
 ---
 title: "Actualité JFR+"
-date: "2025-09-15T15:13:28.087Z"
+date: "2025-09-15T16:14:03.783Z"
 publishedDate: "15 septembre 2025"
 summary: "Actualité JFR+"
-sourceUrl: "http://www.jfr.plus/sites/www.jfr.plus/files/styles/large/public/medias/images/2023/04/logo-jfr.png"
+sourceUrl: "http://www.jfr.plus/user/login"
 permalink: "/clearecondl/2025-09-15-actualite-jfr"
 tags: ["CleareconDL", "JFR+"]
-imageUrl: "http://www.jfr.plus/sites/www.jfr.plus/files/styles/large/public/medias/images/2023/04/logo-jfr.png"
-imageCredit: "Image — http://www.jfr.plus/sites/www.jfr.plus/files/styles/large/public/medias/images/2023/04/logo-jfr.png"
+imageUrl: "http://www.jfr.plus/user/login"
+imageCredit: "Image — http://www.jfr.plus/user/login"
 ---
 
-![Actualité JFR+](http://www.jfr.plus/sites/www.jfr.plus/files/styles/large/public/medias/images/2023/04/logo-jfr.png)
+![Actualité JFR+](http://www.jfr.plus/user/login)
 
 ## Résumé
 
@@ -18,4 +18,4 @@ Actualité JFR+
 
 ## Lien
 
-http://www.jfr.plus/sites/www.jfr.plus/files/styles/large/public/medias/images/2023/04/logo-jfr.png
+http://www.jfr.plus/user/login
