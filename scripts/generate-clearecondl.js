@@ -1,5 +1,6 @@
 // scripts/generate-clearecondl.js
-// v2.3 — CleaReconDL colonne gauche (100% auto, sans ENV)
+// v2.4 — CleaReconDL colonne gauche (100% auto, sans ENV)
+// - + JFR+ (jfr.plus) : scraping de la recherche "ec_news" (sans RSS)
 // - UA "navigateur" pour éviter 403 (YouTube) et durcir la compatibilité
 // - LinkedIn: AUCUNE requête directe -> tout passe par r.jina.ai (SERP + OG)
 // - YouTube GE HealthCare: channel_id officiel + fallback user
@@ -38,6 +39,7 @@ const SEARCH_FEEDS = [
   { name: "YouTube Search",         url: "https://www.youtube.com/feeds/videos.xml?search_query={q}" },
   { name: "Google News (web)",      url: "https://news.google.com/rss/search?q={q}&hl=fr&gl=FR&ceid=FR:fr" },
   { name: "Bing News (web)",        url: "https://www.bing.com/news/search?q={q}&format=RSS" },
+  { name: "Reddit",                 url: "https://www.reddit.com/search.rss?q={q}" },
   { name: "Reddit",                 url: "https://www.reddit.com/search.rss?q={q}" },
 ];
 
@@ -298,6 +300,117 @@ async function scrapeRecentPostsFromProfile(profileUrl, maxLinks = 10) {
   }
 }
 
+/* ===== JFR+ (sans RSS) ===== */
+// Parcourt la recherche filtrée sur le type "ec_news" (Actualités), pages 0..N.
+// Utilise r.jina.ai pour obtenir un HTML "plat" sans JS.
+const JFR_BASE = "https://www.jfr.plus";
+const JFR_SEARCH_BASE = `${JFR_BASE}/recherche?f%5B0%5D=type-bundle%3Aec_news`;
+
+function absolutizeJfr(u) {
+  try {
+    if (/^https?:\/\//i.test(u)) return u;
+    if (u.startsWith("//")) return `https:${u}`;
+    if (u.startsWith("/")) return `${JFR_BASE}${u}`;
+    return `${JFR_BASE}/${u}`;
+  } catch { return u; }
+}
+
+function extractFirstDateISOFromHtml(html) {
+  const pick = (re) => html.match(re)?.[1] || "";
+  // 1) meta article:published_time
+  const m1 = pick(/<meta[^>]+property=["']article:published_time["'][^>]*content=["']([^"']+)["']/i);
+  if (m1) {
+    const t = Date.parse(m1);
+    if (!Number.isNaN(t)) return new Date(t).toISOString();
+  }
+  // 2) <time datetime="...">
+  const m2 = pick(/<time[^>]+datetime=["']([^"']+)["']/i);
+  if (m2) {
+    const t = Date.parse(m2);
+    if (!Number.isNaN(t)) return new Date(t).toISOString();
+  }
+  // 3) fallback: og:updated_time
+  const m3 = pick(/<meta[^>]+property=["']og:updated_time["'][^>]*content=["']([^"']+)["']/i);
+  if (m3) {
+    const t = Date.parse(m3);
+    if (!Number.isNaN(t)) return new Date(t).toISOString();
+  }
+  return new Date().toISOString();
+}
+
+async function fetchJfrArticleMeta(articleUrl) {
+  try {
+    const res = await timedFetch(JINA(articleUrl), { headers: { Accept: "text/html" } });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const html = await res.text();
+    const { title, desc, image } = await fetchOgMeta(articleUrl);
+    const dateISO = extractFirstDateISOFromHtml(html);
+    // Si pas de titre OG, tenter <title>
+    const titleFallback = title || cleanText(html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || "") || "Actualité JFR+";
+    return { title: titleFallback, desc: desc || "", image: image || null, dateISO };
+  } catch (err) {
+    console.error("fetchJfrArticleMeta error:", articleUrl, String(err).slice(0,160));
+    return { title: "Actualité JFR+", desc: "", image: null, dateISO: new Date().toISOString() };
+  }
+}
+
+async function collectJFRPlus(raw, bump, maxPages = 3, maxPerPage = 40) {
+  const found = new Set();
+  for (let page = 0; page < maxPages; page++) {
+    const url = page === 0 ? JFR_SEARCH_BASE : `${JFR_SEARCH_BASE}&page=${page}`;
+    const proxied = JINA(url);
+    try {
+      const res = await timedFetch(proxied, { headers: { Accept: "text/plain" } });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const text = await res.text();
+
+      // Récupère liens absolus et relatifs vers des pages d'actu
+      const links = new Set();
+
+      // Liens absolus jfr.plus
+      for (const m of text.matchAll(/https?:\/\/(?:www\.)?jfr\.plus\/[^\s"')]+/gi)) {
+        const u = m[0].replace(/[\.,]$/, "");
+        if (!/\/recherche(\?|$)/i.test(u)) links.add(u);
+        if (links.size >= maxPerPage) break;
+      }
+      // Liens relatifs
+      for (const m of text.matchAll(/href=["'](\/[^"']+)["']/gi)) {
+        const rel = m[1];
+        // heuristique: actualités, jfr-20xx, node…
+        if (/^\/(actualites|node|jfr-20\d{2}|.*ec_news)/i.test(rel)) {
+          const abs = absolutizeJfr(rel);
+          if (!/\/recherche(\?|$)/i.test(abs)) links.add(abs);
+          if (links.size >= maxPerPage) break;
+        }
+      }
+
+      let addedHere = 0;
+      for (const u of links) {
+        const key = normalizeUrl(u);
+        if (found.has(key)) continue;
+        found.add(key);
+
+        const meta = await fetchJfrArticleMeta(u);
+        raw.push({
+          title: meta.title,
+          summary: meta.desc,
+          link: u,
+          dateISO: meta.dateISO,
+          source: "JFR+",
+          image: meta.image || null,
+        });
+        addedHere++;
+      }
+      bump(`JFR+ page ${page}`, addedHere);
+      // S’il n’y a presque rien, inutile d’aller plus loin
+      if (addedHere === 0) break;
+    } catch (err) {
+      console.error("JFR+ fetch error:", url, String(err).slice(0,160));
+      if (page === 0) break;
+    }
+  }
+}
+
 /* ===== FS ===== */
 function ensureDirs() { for (const d of OUT_DIRS) fs.mkdirSync(d, { recursive: true }); }
 function readExisting() {
@@ -325,6 +438,9 @@ async function main() {
 
   /* 0) YouTube (avant tout) */
   await collectYouTube(raw, bump);
+
+  /* 0bis) JFR+ (Actualités) */
+  await collectJFRPlus(raw, bump, /*maxPages=*/3);
 
   /* 1) Compléments (Search/News/Reddit) */
   for (const q of KEY_QUERIES) {
@@ -387,6 +503,10 @@ async function main() {
   const filtered = uniq.filter((it) => {
     const host = hostOf(it.link);
     const text = `${it.title || ""} ${it.summary || ""} ${it.link || ""}`;
+
+    // JFR+ : on accepte tout ce qui vient du site officiel (Actualités)
+    if (host.endsWith("jfr.plus")) return true;
+
     if (host.endsWith("linkedin.com")) {
       const cls = classifyLinkedIn(it.link);
       if (!(cls === "post" || cls === "profile-posts")) return false;
@@ -415,7 +535,7 @@ async function main() {
 
     // OG meta (avec proxy automatique pour linkedin)
     const meta = await fetchOgMeta(it.link);
-    const imageUrl = meta.image || "";
+    const imageUrl = it.image || meta.image || "";
 
     const fm = {
       title: it.title || meta.title || "Post",
@@ -439,7 +559,7 @@ async function main() {
     created++;
   }
 
-  console.log(`✅ CleaReconDL v2.3: ${created} créé(s) — pertinents: ${filtered.length} — bruts: ${raw.length} — uniq après redirection: ${uniq.length}`);
+  console.log(`✅ CleaReconDL v2.4: ${created} créé(s) — pertinents: ${filtered.length} — bruts: ${raw.length} — uniq après redirection: ${uniq.length}`);
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
