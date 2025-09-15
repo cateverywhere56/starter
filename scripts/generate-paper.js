@@ -22,7 +22,7 @@ const FEEDS = [
   { name: "JSCAI — Journal of the Society for Cardiovascular Angiography & Interventions", url: "https://rss.sciencedirect.com/publication/science/2772-9303" },
 
   /* Radiologie interventionnelle */
-  { name: "SIR — IR Quarterly (news/podcast)", url: "https://irq.sirweb.org/feed/" },
+  { name: "SIR — IR Quarterly (news/podcast)", url: "https://irq.sirweb.org/api/rss/content.rss" },
 
   /* Neuro-intervention */
   { name: "Journal of NeuroInterventional Surgery — Current", url: "https://jnis.bmj.com/rss/current.xml" },
