@@ -1,16 +1,16 @@
 ---
 title: "Actualité JFR+"
-date: "2025-09-16T04:13:47.290Z"
+date: "2025-09-16T05:11:17.613Z"
 publishedDate: "16 septembre 2025"
 summary: "Actualité JFR+"
-sourceUrl: "http://www.jfr.plus/sites/www.jfr.plus/files/styles/small_16_9/public/medias/images/2025/09/Capture%20d%27%C3%A9cran%202025-09-05%20144039.png?h=ed850751"
+sourceUrl: "http://www.jfr.plus/user/login"
 permalink: "/clearecondl/2025-09-16-actualite-jfr"
 tags: ["CleareconDL", "JFR+"]
-imageUrl: "http://www.jfr.plus/sites/www.jfr.plus/files/styles/small_16_9/public/medias/images/2025/09/Capture%20d%27%C3%A9cran%202025-09-05%20144039.png?h=ed850751"
-imageCredit: "Image — http://www.jfr.plus/sites/www.jfr.plus/files/styles/small_16_9/public/medias/images/2025/09/Capture%20d%27%C3%A9cran%202025-09-05%20144039.png?h=ed850751"
+imageUrl: "http://www.jfr.plus/user/login"
+imageCredit: "Image — http://www.jfr.plus/user/login"
 ---
 
-![Actualité JFR+](http://www.jfr.plus/sites/www.jfr.plus/files/styles/small_16_9/public/medias/images/2025/09/Capture%20d%27%C3%A9cran%202025-09-05%20144039.png?h=ed850751)
+![Actualité JFR+](http://www.jfr.plus/user/login)
 
 ## Résumé
 
@@ -18,4 +18,4 @@ Actualité JFR+
 
 ## Lien
 
-http://www.jfr.plus/sites/www.jfr.plus/files/styles/small_16_9/public/medias/images/2025/09/Capture%20d%27%C3%A9cran%202025-09-05%20144039.png?h=ed850751
+http://www.jfr.plus/user/login
