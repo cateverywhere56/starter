@@ -436,12 +436,6 @@ async function main() {
   const raw = [];
   const stats = new Map(); const bump = (k,n=1)=>stats.set(k,(stats.get(k)||0)+n);
 
-  /* 0) YouTube (avant tout) */
-  await collectYouTube(raw, bump);
-
-  /* 0bis) JFR+ (Actualités) */
-  await collectJFRPlus(raw, bump, /*maxPages=*/3);
-
   /* 1) Compléments (Search/News/Reddit) */
   for (const q of KEY_QUERIES) {
     for (const feed of SEARCH_FEEDS) {
