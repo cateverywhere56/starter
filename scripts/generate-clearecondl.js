@@ -24,8 +24,7 @@ const KEY_QUERIES = [
 ];
 
 const LINKEDIN_PEOPLE = [
-  "Charles Nutting",
-  "Ioanne Cartier",
+  "",
 ];
 
 // YouTube GE HealthCare
@@ -303,7 +302,7 @@ async function scrapeRecentPostsFromProfile(profileUrl, maxLinks = 10) {
 /* ===== JFR+ (sans RSS) ===== */
 // Parcourt la recherche filtrée sur le type "ec_news" (Actualités), pages 0..N.
 // Utilise r.jina.ai pour obtenir un HTML "plat" sans JS.
-const JFR_BASE = "https://www.jfr.plus";
+const JFR_BASE = "https://www.jf.fr";
 const JFR_SEARCH_BASE = `${JFR_BASE}/recherche?f%5B0%5D=type-bundle%3Aec_news`;
 
 function absolutizeJfr(u) {
