@@ -3,7 +3,7 @@ title: "GEHC Stock May Rise Following the Launch of AI-Based CleaRecon DL"
 date: "2025-05-16T00:12:00.000Z"
 publishedDate: "16 mai 2025"
 summary: "GE HealthCare Technologies Inc. GEHC recently announced the launch of CleaRecon DL, an innovative AI-based deep learning technology designed to enhance 3D cone-beam computed tomography (CBCT) imaging ..."
-sourceUrl: "https://finance.yahoo.com/news/gehc-stock-may-rise-following-141200339.html"
+sourceUrl: "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=6929e707cc2f4f078522822e7c3a531f&url=https%3a%2f%2ffinance.yahoo.com%2fnews%2fgehc-stock-may-rise-following-141200339.html&c=6877183934673587902&mkt=en-us"
 permalink: "/clearecondl/2025-05-16-gehc-stock-may-rise-following-the-launch-of-ai-based-clearecon-dl"
 tags: ["CleareconDL", "Bing News (web)"]
 imageUrl: ""
@@ -16,4 +16,4 @@ GE HealthCare Technologies Inc. GEHC recently announced the launch of CleaRecon 
 
 ## Lien
 
-https://finance.yahoo.com/news/gehc-stock-may-rise-following-141200339.html
+http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=6929e707cc2f4f078522822e7c3a531f&url=https%3a%2f%2ffinance.yahoo.com%2fnews%2fgehc-stock-may-rise-following-141200339.html&c=6877183934673587902&mkt=en-us
